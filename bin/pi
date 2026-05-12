@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Wrapper that routes pi through the Claude Code system-prompt fingerprint
+# so the Anthropic OAuth token bills against Claude Pro/Max instead of
+# "third-party app extra usage".
+# Disable per-invocation: PI_NO_SPOOF=1 pi ...
+# Override real binary: PI_REAL=/path/to/pi pi ...
+# Edit fingerprint: ~/.pi/agent/system-prompt.txt
+
+# Auto-detect the real pi binary. Skips this wrapper by checking each
+# $PATH entry in order and picking the first non-self match. Override
+# with PI_REAL=... in the environment if the heuristic picks wrong.
+if [ -z "${PI_REAL:-}" ]; then
+  _self="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+  IFS=':' read -ra _path_dirs <<< "$PATH"
+  for _d in "${_path_dirs[@]}"; do
+    [ -z "$_d" ] && continue
+    _candidate="$_d/pi"
+    [ ! -x "$_candidate" ] && continue
+    _resolved="$(readlink -f "$_candidate" 2>/dev/null || echo "$_candidate")"
+    if [ "$_resolved" != "$_self" ]; then
+      PI_REAL="$_candidate"
+      break
+    fi
+  done
+fi
+if [ -z "${PI_REAL:-}" ] || [ ! -x "$PI_REAL" ]; then
+  echo "pi (wrapper): real binary not found on \$PATH. Set PI_REAL explicitly." >&2
+  exit 127
+fi
+PI_PROMPT_FILE="${PI_PROMPT_FILE:-$HOME/.pi/agent/system-prompt.txt}"
+
+# Skip the spoof for subcommands (install/list/update/etc.) and meta flags
+# that don't make API calls — only inject for actual chat invocations.
+case "$1" in
+  install|remove|uninstall|update|list|config|mcp|auth|--version|-v|--help|-h|--list-models|--export)
+    exec "$PI_REAL" "$@"
+    ;;
+esac
+
+if [ "${PI_NO_SPOOF:-0}" = "1" ] || [ ! -f "$PI_PROMPT_FILE" ]; then
+  exec "$PI_REAL" "$@"
+fi
+
+# Don't double-inject if the user passed their own system prompt
+for arg in "$@"; do
+  case "$arg" in
+    --system-prompt|--system-prompt-file)
+      exec "$PI_REAL" "$@"
+      ;;
+  esac
+done
+
+exec "$PI_REAL" --system-prompt "$(cat "$PI_PROMPT_FILE")" "$@"
