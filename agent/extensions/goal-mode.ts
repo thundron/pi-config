@@ -438,6 +438,13 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
+		// Cancel any pending auto-continue timers so they can't fire after the
+		// session is replaced/quit and try to sendUserMessage on a stale state.
+		for (const t of pendingTimers) clearTimeout(t);
+		pendingTimers.clear();
+		// Bump generation so any in-flight check that races shutdown sees a
+		// mismatch and bails.
+		autoContinueGeneration += 1;
 		// Best-effort: clear footer.
 		if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, undefined);
 	});
@@ -532,6 +539,14 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
+	/**
+	 * Tracked timer handles so session_shutdown can cancel any pending
+	 * auto-continuation timers. Without this, a timer can fire after pi has
+	 * begun tearing down the session and try to sendUserMessage on a stale
+	 * state, producing extension errors or spurious messages.
+	 */
+	const pendingTimers = new Set<NodeJS.Timeout>();
+
 	function scheduleContinuation(
 		prompt: string,
 		pi: ExtensionAPI,
@@ -546,7 +561,8 @@ export default function (pi: ExtensionAPI) {
 			appendStatus(pi, "paused", { summary: "auto: hard-limit reached" });
 			return;
 		}
-		setTimeout(() => {
+		const timer: NodeJS.Timeout = setTimeout(() => {
+			pendingTimers.delete(timer);
 			if (myGen !== autoContinueGeneration) return; // preempted by user input or branch switch
 			if (!ctx.isIdle()) return;
 			if (ctx.hasPendingMessages()) return;
@@ -559,6 +575,10 @@ export default function (pi: ExtensionAPI) {
 			autoContinueCount += 1;
 			pi.sendUserMessage(prompt);
 		}, AUTO_CONTINUE_IDLE_DELAY_MS);
+		pendingTimers.add(timer);
+		// Allow node to exit even when the timer is pending (defensive — pi's
+		// runtime keeps the process alive on its own).
+		if (typeof timer.unref === "function") timer.unref();
 	}
 
 	// ─── Model-callable tool: update_goal ────────────────────────────────────

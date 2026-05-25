@@ -1,0 +1,17 @@
+{
+  "_codex_source": "codex-rs/execpolicy/ (prefix_rule schema, simplified to JSON)",
+  "_note": "User rules layered ON TOP of guardian.ts's DEFAULT_EXECPOLICY. Move/rename to execpolicy.json to activate.",
+  "rules": [
+    {
+      "pattern": ["sudo"],
+      "decision": "forbidden",
+      "justification": "sudo is banned in agent contexts; if you need elevated privileges, ask the user to run the command manually."
+    },
+    {
+      "pattern": ["curl", ["|", "bash"]],
+      "decision": "forbidden",
+      "justification": "Piping curl output to bash is unsafe. Download to a file first, inspect it, then run.",
+      "regex": "\\bcurl\\b[^|]*\\|\\s*(?:bash|sh|zsh)\\b"
+    }
+  ]
+}

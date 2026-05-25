@@ -63,8 +63,11 @@ useful only once `pi-fleet` itself is installed.
 | `~/.pi/agent/extensions/fleet-citizen.ts`            | → | `agent/extensions/fleet-citizen.ts`      |
 | `~/.pi/agent/extensions/goal-mode.ts`                | → | `agent/extensions/goal-mode.ts`          |
 | `~/.pi/agent/extensions/goal-mode.README.md`         | → | `agent/extensions/goal-mode.README.md`   |
+| `~/.pi/agent/extensions/subagents.ts`                | → | `agent/extensions/subagents.ts`          |
+| `~/.pi/agent/extensions/subagents.README.md`         | → | `agent/extensions/subagents.README.md`   |
+| `~/.pi/agent/extensions/codex-cli-extras.ts`         | → | `agent/extensions/codex-cli-extras.ts`   |
 | `~/.pi/agent/skills/claude-code/SKILL.md`            | → | `agent/skills/claude-code/SKILL.md`      |
-| `~/.pi/agent/skills/pi-fleet/SKILL.md`               | → | `agent/skills/pi-fleet/SKILL.md`         |
+| `~/.pi/agent/skills/subagents/SKILL.md`              | → | `agent/skills/subagents/SKILL.md`        |
 
 ### Copy (pi rewrites it at runtime; cannot be a symlink)
 
@@ -113,12 +116,35 @@ The one line the wrapper injects:
 You are Claude Code, Anthropic's official CLI for Claude.
 ```
 
-### `agent/extensions/fleet-citizen.ts`
+### `agent/extensions/guardian.ts` (+ `fleet-citizen.ts` back-compat stub)
 
-Required by [pi-fleet][pi-fleet]: footer status, banned-phrase guard,
-dangerous-bash blocker, `/done` + `/halt` slash commands. `pi-fleet`'s
-supervisor only reads this file; it never writes or installs it, so
-keeping it under version control here is the right ownership.
+Loaded inside every pi sub-agent child (whether spawned by `subagents.ts`
+or by the legacy [pi-fleet][pi-fleet] Python supervisor) to enforce
+identity, agent-role, execution policy, and ritual workflow. Renamed from
+`fleet-citizen.ts` and restructured into 5 codex-shaped sections:
+
+1. **identity** — reads `PI_GUARDIAN_RUN_ID` / `PI_GUARDIAN_AGENT_ID` /
+   `PI_GUARDIAN_RUN_DIR` / `PI_GUARDIAN_AGENT_DIR` env vars (with legacy
+   `PI_FLEET_*` fallback) to know who this child is.
+2. **agent-role** (codex `core/src/agent/role.rs` analog) — when
+   `PI_GUARDIAN_ROLE` is set, loads `~/.pi/agent/roles/<name>.json` and
+   layers its `developer_instructions` into the child's system prompt.
+   Sample role `agent/roles/awaiter.json` ported verbatim from codex's
+   `awaiter.toml`.
+3. **execpolicy** (codex `execpolicy/` analog) — prefix-rule based
+   tool-call blocker. Built-in defaults port the legacy bash regex
+   guardrails (`find /`, `git push`, `rm -rf /`, etc.) into
+   codex-shaped rules. User rules at `~/.pi/agent/execpolicy.json` layer
+   on top; sample at `agent/execpolicy.example.json`.
+4. **banned-phrases** — Lorenzo-specific assistant-text scanner (no codex
+   equivalent). Auto-steers on hit, aborts after 3 hits.
+5. **rituals** — `/done`, `/halt`, `/guardian` (new name) + `/fleet`
+   (legacy alias for muscle memory).
+
+`fleet-citizen.ts` is a one-line delegating stub kept in the repo because
+pi-fleet's Python supervisor hardcodes that path (`supervisor.py:265`).
+The `guardian()` factory itself owns a load-once sentinel so loading both
+files is harmless — the first registration wins.
 
 [pi-fleet]: https://github.com/thundron/pi-fleet
 
@@ -141,11 +167,143 @@ prompts (refactor / fix bug / review PR / multi-turn coding) rather
 than only when invoked via `/claude-code`. Body is unchanged from
 upstream.
 
-### `agent/skills/pi-fleet/SKILL.md`
+### `agent/extensions/subagents.ts` (+ README)
 
-Pi's pi-fleet skill — instructs the agent on how to dispatch and steer
-parallel pi agents via the pi-fleet orchestrator. Mirrors the
-`fleet-citizen.ts` extension above.
+Ports OpenAI Codex's `multi_agents` tool family (`subagent_spawn` /
+`subagent_wait` / `subagent_list` / `subagent_close`) and the
+`/subagents` slash command to pi. The **parent pi session dispatches
+sub-agents as part of its own reasoning** by calling tools, replacing
+the legacy [pi-fleet][pi-fleet] Python supervisor's manifest-driven
+workflow. Sidesteps the upstream `pi --mode rpc` stream-handling bug
+by spawning sub-agents as one-shot `pi -p --mode json` subprocesses.
+
+State layout (`~/.pi/fleet/runs/<runId>/`) is preserved for backward
+compatibility with the legacy `pi-fleet status / watch / tmux /
+replay / reap` CLI commands. The manifest `fire` flow is reinstated
+as `/subagents fire <manifest.json>`, so existing
+`phase7.fleet.json`-style manifests keep working.
+
+Naming aligns with industry standards (Anthropic Claude Code
+"Subagents"; codex `/subagents` slash command). See the sidecar
+README for the full tool surface, parameter shapes, and brief-writing
+rules.
+
+[pi-fleet]: https://github.com/thundron/pi-fleet
+
+### `agent/skills/subagents/SKILL.md`
+
+Teaches the agent when and how to dispatch sub-agents via the
+`subagent_*` tools above — patterns for parallel implementation,
+fan-out investigation, isolated long-running builds, and the
+self-contained-brief rule (sub-agents inherit none of your session
+state).
+
+### `agent/extensions/codex-cli-extras.ts`
+
+Grab-bag of small codex slash-command ports tracked in
+[`PORT-PLAN.md`](./PORT-PLAN.md). Currently:
+
+- `/diff` — `git diff` of tracked + untracked changes (ports
+  `codex-rs/tui/src/get_git_diff.rs`).
+- `/init` — generate `AGENTS.md` with project context (ports
+  `codex-rs/tui/prompt_for_init_command.md`); guards against
+  overwriting an existing file.
+- `/review` — review code changes (ports `codex-rs/core/src/review_prompts.rs`).
+  Usage: `/review` (uncommitted) / `/review base <branch>` / `/review commit <sha>` /
+  `/review <free-text>`. Computes merge-base + commit titles automatically.
+- `/rollout` — print the current session's JSONL rollout path.
+- `/feedback` — print feedback channels + attachable context.
+- `/test-approval` — exercise pi's `ctx.ui.confirm` + `ctx.ui.select` dialog APIs.
+
+### `agent/extensions/side-conversation.ts`
+
+Ports codex's `/side` + `/btw` ephemeral side-conversation pattern. A side
+conversation forks the current thread into a separate session where inherited
+history is treated as reference-only via a boundary prompt embedded verbatim
+from `codex-rs/tui/src/app/side.rs`. Commands:
+
+- `/side [text]` — fork the current state into an ephemeral side session,
+  inject the codex boundary prompt, and (optionally) your first question.
+- `/btw [text]` — codex alias for `/side`.
+- `/return` — switch back to the parent session. Replaces codex's `Ctrl+C
+  to return` shortcut (pi extensions can't sensibly rebind Ctrl+C).
+
+### `agent/extensions/plan-mode.ts`
+
+Ports codex's `/plan` collaboration mode. Embeds codex's
+`collaboration-mode-templates/templates/plan.md` verbatim and injects it as a
+synthetic context message before every LLM call while plan mode is active.
+When toggled on, restricts the active tool set to read-mostly (`read`, `bash`,
+`grep`, `find`, `ls`) and stashes the previous tool list. `/execute` exits and
+restores the previous tools. State persists across session resumes via
+`custom_message` entries on the branch.
+
+### `agent/extensions/memories.ts`
+
+Ports a focused subset of codex's `/memories` feature — a persistent
+cross-session registry at `~/.pi/memories/MEMORY.md`. Registers `memory_save`
+and `memory_recall` as model-callable tools, plus a `/memories` slash command
+with `add` / `where` / `clear` subcommands. When the registry is non-empty, a
+small context hint is prepended to every LLM call pointing the model at the
+tools (paraphrased from `codex-rs/memories/read/templates/memories/read_path.md`).
+v0 deliberately skips codex's rollout-extraction and consolidation pipelines
+— those are documented in the extension header as deferred.
+
+### `agent/extensions/personality.ts`
+
+Ports codex's `/personality` slash command and its two communication-style
+presets (`friendly`, `pragmatic`). Templates are embedded verbatim from
+`codex-rs/core/templates/personalities/gpt-5.2-codex_{friendly,pragmatic}.md`
+and injected into context on every LLM call when active. Usage:
+`/personality` (list + show current), `/personality friendly|pragmatic` (set),
+`/personality off` (clear). State persists across session resumes via
+`custom_message` entries on the branch.
+
+### `agent/extensions/introspection.ts`
+
+Grab-bag for codex introspection slash commands. Currently:
+
+- `/hooks` — list all 29 pi extension lifecycle events grouped by category,
+  with per-session fire counts (`×N` badges). `/hooks all` for full descriptions,
+  `/hooks reset` to zero the counts. Codex's static hook-declarations browser
+  doesn't map cleanly to pi's extension event model (pi extensions subscribe via
+  `pi.on(event, handler)` rather than TOML declarations), so this port surfaces
+  live activity instead — useful when debugging extensions or learning what's
+  fireable from a handler.
+- `/tools` / `/mcp` — enumerate every registered tool grouped by source
+  extension, with `●` active / `○` inactive markers and an optional substring
+  filter. `/mcp` is an alias because pi treats MCP-sourced tools the same as
+  any other extension tool (ports `codex-rs/tui/src/chatwidget.rs add_mcp_output`).
+- `/debug-config` — dump runtime state (model, thinking level, cwd, session
+  id+file), settings layers (global + project) with their top-level keys,
+  every loaded extension and its slash commands, and pi/codex-related env
+  vars (ports `codex-rs/tui/src/chatwidget.rs add_debug_config_output`).
+
+### `agent/extensions/background-procs.ts`
+
+Ports codex's `/ps` + `/stop` background-terminal management. Pi has no
+unified-exec subsystem, so this extension tracks processes via two paths:
+(1) a model-callable `bg_register({ pid, command })` tool the model invokes
+after backgrounding a process, and (2) auto-detection on bash `tool_result`
+when the command shows backgrounding patterns (`&`, `nohup`, `setsid`,
+`disown`) and the output matches well-known PID announcements. Surfaces:
+`/ps` (live alive-check via `kill -0`), `/stop <id|all>` (SIGTERM), and
+`/bg cleanup` (purge dead from the registry).
+
+### `agent/extensions/terminal-title.ts`
+
+Ports codex's `/title` slash command. Uses `ctx.ui.setTitle()` to update the
+terminal window/tab title from a templated string that interpolates runtime
+placeholders: `{cwd}`, `{fullcwd}`, `{model}`, `{thinking}`, `{provider}`,
+`{branch}`, `{session}`. Re-renders on every event that changes a value
+(`turn_end`, `model_select`, `thinking_level_select`). Persists across
+session resumes via `custom_message` entries on the branch.
+
+### `agent/extensions/pets.ts`
+
+Ports codex's `/pets` terminal pet. Animates an ASCII pet in the pi footer
+via `setInterval` + `ctx.ui.setStatus`. Available pets: dog, cat, fish,
+snake, hamster. Pure delight; persists across session resumes.
 
 ### `agent/settings.json`
 
