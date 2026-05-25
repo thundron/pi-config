@@ -1,6 +1,12 @@
 {
-  "lastChangelogVersion": "0.74.0",
+  "lastChangelogVersion": "0.75.5",
   "defaultProvider": "anthropic",
   "defaultModel": "claude-opus-4-7",
-  "defaultThinkingLevel": "medium"
+  "defaultThinkingLevel": "xhigh",
+  "compaction": {
+    "enabled": true
+  },
+  "retry": {
+    "enabled": true
+  }
 }
