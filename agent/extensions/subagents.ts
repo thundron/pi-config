@@ -502,11 +502,14 @@ export default function (pi: ExtensionAPI) {
 				refreshFooter(ctx);
 
 				const argv = buildChildArgv(record);
+				// Strip PI_GUARDIAN_LOADED so the child's guardian.ts isn't disabled.
+				const { PI_GUARDIAN_LOADED: _drop, ...inheritedEnv } = process.env;
+				void _drop;
 				const child = spawnProc("pi", argv, {
 					cwd: record.cwd,
 					stdio: ["ignore", "pipe", "pipe"],
 					env: {
-						...process.env,
+						...inheritedEnv,
 						PI_NO_SPOOF: process.env.PI_NO_SPOOF ?? "0",
 						// guardian.ts (new codex-shaped name) picks these up
 						PI_GUARDIAN_RUN_ID: rid,

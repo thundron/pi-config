@@ -26,19 +26,34 @@ ts="$(date +%s)"
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
-# Resolve a path's canonical form on either GNU or BSD coreutils.
-# Returns $1 unchanged if neither realpath nor readlink -f is available.
+# Portable canonical-path resolver (realpath → readlink -f → while-symlink fallback).
 canon() {
+  local src="$1"
+  [ -z "$src" ] && return 1
   if command -v realpath >/dev/null 2>&1; then
-    realpath "$1" 2>/dev/null || printf '%s\n' "$1"
-  elif readlink -f -- "$1" >/dev/null 2>&1; then
-    readlink -f -- "$1"
-  else
-    case "$1" in
-      /*) printf '%s\n' "$1" ;;
-      *)  printf '%s/%s\n' "$(cd "$(dirname "$1")" 2>/dev/null && pwd)" "$(basename "$1")" ;;
-    esac
+    realpath -- "$src" 2>/dev/null && return 0
   fi
+  if readlink -f -- "$src" >/dev/null 2>&1; then
+    readlink -f -- "$src"
+    return 0
+  fi
+  local dir
+  while [ -L "$src" ]; do
+    dir=$(cd -P "$(dirname -- "$src")" 2>/dev/null && pwd) || break
+    src=$(readlink -- "$src") || break
+    case "$src" in /*) ;; *) src="$dir/$src" ;; esac
+  done
+  if [ -e "$src" ] || [ -L "$src" ]; then
+    dir=$(cd -P "$(dirname -- "$src")" 2>/dev/null && pwd)
+    if [ -n "$dir" ]; then
+      printf '%s/%s\n' "$dir" "$(basename -- "$src")"
+      return 0
+    fi
+  fi
+  case "$src" in
+    /*) printf '%s\n' "$src" ;;
+    *)  printf '%s/%s\n' "$(pwd)" "$src" ;;
+  esac
 }
 
 # Symlink a live path to a repo file.
@@ -86,8 +101,12 @@ link() {
   printf '  linked:   %s → %s\n' "$live" "$repo_file"
 }
 
-# Copy-sync (NOT symlink) a live path to a repo file. Use for files pi
-# rewrites at runtime (settings.json). Warns on drift; never clobbers.
+# Strip pi-self-mutated fields (lastChangelogVersion) before drift compare.
+_settings_normalize() {
+  grep -v '"lastChangelogVersion"' -- "$1" 2>/dev/null || true
+}
+
+# Copy-sync a live file to/from the repo. Warns on meaningful drift; never clobbers.
 copy_synced() {
   local live="$1"
   local repo_rel="$2"
@@ -109,16 +128,20 @@ copy_synced() {
     return 0
   fi
 
-  # Both exist
+  # Both exist: byte-equal OR equal-after-normalize → in sync.
   if [ -e "$live" ] && [ -e "$repo_file" ]; then
     if cmp -s "$live" "$repo_file"; then
       printf '  ok:       %s (copy in sync)\n' "$live"
-    else
-      printf '  DRIFT:    %s differs from %s\n' "$live" "$repo_file" >&2
-      printf '            reconcile by hand:\n' >&2
-      printf '              cp "%s" "%s"   # live → repo\n' "$live" "$repo_file" >&2
-      printf '              cp "%s" "%s"   # repo → live\n' "$repo_file" "$live" >&2
+      return 0
     fi
+    if diff -q <(_settings_normalize "$live") <(_settings_normalize "$repo_file") >/dev/null 2>&1; then
+      printf '  ok:       %s (in sync ignoring pi-managed fields)\n' "$live"
+      return 0
+    fi
+    printf '  DRIFT:    %s differs from %s\n' "$live" "$repo_file" >&2
+    printf '            reconcile by hand:\n' >&2
+    printf '              cp "%s" "%s"   # live → repo\n' "$live" "$repo_file" >&2
+    printf '              cp "%s" "%s"   # repo → live\n' "$repo_file" "$live" >&2
     return 0
   fi
 
@@ -148,6 +171,8 @@ link "$HOME/.pi/agent/extensions/introspection.ts"        "agent/extensions/intr
 link "$HOME/.pi/agent/extensions/background-procs.ts"     "agent/extensions/background-procs.ts"
 link "$HOME/.pi/agent/extensions/terminal-title.ts"       "agent/extensions/terminal-title.ts"
 link "$HOME/.pi/agent/extensions/pets.ts"                 "agent/extensions/pets.ts"
+link "$HOME/.pi/agent/extensions/context-diet.ts"         "agent/extensions/context-diet.ts"
+link "$HOME/.pi/agent/extensions/context-diet.README.md"  "agent/extensions/context-diet.README.md"
 link "$HOME/.pi/agent/skills/claude-code/SKILL.md"        "agent/skills/claude-code/SKILL.md"
 link "$HOME/.pi/agent/skills/subagents/SKILL.md"         "agent/skills/subagents/SKILL.md"
 link "$HOME/.pi/agent/roles/awaiter.json"                 "agent/roles/awaiter.json"

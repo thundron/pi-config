@@ -66,6 +66,8 @@ useful only once `pi-fleet` itself is installed.
 | `~/.pi/agent/extensions/subagents.ts`                | → | `agent/extensions/subagents.ts`          |
 | `~/.pi/agent/extensions/subagents.README.md`         | → | `agent/extensions/subagents.README.md`   |
 | `~/.pi/agent/extensions/codex-cli-extras.ts`         | → | `agent/extensions/codex-cli-extras.ts`   |
+| `~/.pi/agent/extensions/context-diet.ts`             | → | `agent/extensions/context-diet.ts`       |
+| `~/.pi/agent/extensions/context-diet.README.md`      | → | `agent/extensions/context-diet.README.md` |
 | `~/.pi/agent/skills/claude-code/SKILL.md`            | → | `agent/skills/claude-code/SKILL.md`      |
 | `~/.pi/agent/skills/subagents/SKILL.md`              | → | `agent/skills/subagents/SKILL.md`        |
 
@@ -73,7 +75,7 @@ useful only once `pi-fleet` itself is installed.
 
 | Live path                          | ↔ | Repo path              | Notes                       |
 | ---------------------------------- | --- | -------------------- | ------------------------- |
-| `~/.pi/agent/settings.json`        | ↔ | `agent/settings.json`  | pi bumps `lastChangelogVersion` on its own; sync manually when you change a real setting |
+| `~/.pi/agent/settings.json`        | ↔ | `agent/settings.json`  | pi rewrites this at runtime; repo intentionally omits `lastChangelogVersion` (pi self-manages) and the installer ignores that field when checking drift. Sync manually when you change a real setting (model, provider, thinking level, compaction.enabled, retry.enabled, etc.) |
 
 The installer warns on drift for the copy case (it never clobbers).
 Reconcile by hand: `cp <live> <repo>` or the other direction, depending
@@ -299,6 +301,19 @@ placeholders: `{cwd}`, `{fullcwd}`, `{model}`, `{thinking}`, `{provider}`,
 (`turn_end`, `model_select`, `thinking_level_select`). Persists across
 session resumes via `custom_message` entries on the branch.
 
+### `agent/extensions/context-diet.ts` (+ README)
+
+Continuous, non-destructive tool-result compression. Hooks pi's `context`
+event (fires before every LLM call) and rewrites the messages array in-flight
+so old `ToolResultMessage` content gets either **compressed** (head + middle
+trim-marker + tail, default) or **torn out** (single-line stub). Session
+file on disk is never modified — `/resume`, `/fork`, and the built-in
+`/compact` summarizer all see the full original history. Stacks on top of
+`/compact`: compact summarises the branch periodically, context-diet trims
+the live per-turn working set continuously. Footer surfaces running savings
+(`📉 -45KB (12 trims)`). Tunables via `/context-diet ...` subcommands or
+`PI_CONTEXT_DIET_*` env vars. See the sidecar README for the full surface.
+
 ### `agent/extensions/pets.ts`
 
 Ports codex's `/pets` terminal pet. Animates an ASCII pet in the pi footer
@@ -329,7 +344,13 @@ real setting:
 
 ```bash
 cp ~/.pi/agent/settings.json ~/dev/pi-config/agent/settings.json
-git diff agent/settings.json   # ignore lastChangelogVersion-only diffs
+# then strip lastChangelogVersion from the repo copy before committing —
+# pi rewrites that key on every version bump; tracking it just creates
+# permanent diff noise. The installer's drift check ignores it for the
+# same reason.
+jq 'del(.lastChangelogVersion)' ~/dev/pi-config/agent/settings.json \
+   > /tmp/s.json && mv /tmp/s.json ~/dev/pi-config/agent/settings.json
+git diff agent/settings.json
 ```
 
 ## Not upstreamable

@@ -465,16 +465,15 @@ function footerTag(): string {
 
 // ─── extension entrypoint ─────────────────────────────────────────────────
 
-/**
- * Cooperate with the fleet-citizen.ts back-compat stub via an env-var
- * sentinel: whichever extension loads first runs the factory; the second
- * sees the sentinel and no-ops, so commands aren't registered twice.
- */
-const LOAD_SENTINEL = "PI_GUARDIAN_LOADED";
+// Load-once sentinel on `globalThis` (NOT process.env — that leaks to child
+// pi spawns; NOT a module `let` — bun can load .ts twice as separate modules).
+const LOAD_SENTINEL_KEY = "__pi_guardian_loaded__";
 
 export default function guardian(pi: ExtensionAPI): void {
-	if (process.env[LOAD_SENTINEL]) return;
-	process.env[LOAD_SENTINEL] = "1";
+	const g = globalThis as Record<string, unknown>;
+	if (g[LOAD_SENTINEL_KEY]) return;
+	g[LOAD_SENTINEL_KEY] = true;
+	delete process.env.PI_GUARDIAN_LOADED; // scrub any pre-fix leak
 
 	const role = loadRole(ROLE_NAME);
 	const execpolicy = loadExecPolicy();

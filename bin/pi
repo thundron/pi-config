@@ -3,20 +3,44 @@
 # so the Anthropic OAuth token bills against Claude Pro/Max instead of
 # "third-party app extra usage".
 # Disable per-invocation: PI_NO_SPOOF=1 pi ...
-# Override real binary: PI_REAL=/path/to/pi pi ...
-# Edit fingerprint: ~/.pi/agent/system-prompt.txt
+# Override real binary: PI_REAL=/path/to/pi ...
+# Edit fingerprint:    ~/.pi/agent/system-prompt.txt
+#
+# Cross-platform: macOS (BSD coreutils, bash 3.2) + Linux/WSL (GNU coreutils).
+
+# Portable absolute-path resolver (realpath → readlink -f → while-symlink fallback).
+_pi_resolve_abs() {
+  local src="$1"
+  [ -z "$src" ] && return 1
+  if command -v realpath >/dev/null 2>&1; then
+    realpath -- "$src" 2>/dev/null && return 0
+  fi
+  if readlink -f -- "$src" >/dev/null 2>&1; then
+    readlink -f -- "$src"
+    return 0
+  fi
+  local dir
+  while [ -L "$src" ]; do
+    dir=$(cd -P "$(dirname -- "$src")" 2>/dev/null && pwd) || return 1
+    src=$(readlink -- "$src")
+    case "$src" in /*) ;; *) src="$dir/$src" ;; esac
+  done
+  dir=$(cd -P "$(dirname -- "$src")" 2>/dev/null && pwd) || return 1
+  printf '%s/%s\n' "$dir" "$(basename -- "$src")"
+}
 
 # Auto-detect the real pi binary. Skips this wrapper by checking each
 # $PATH entry in order and picking the first non-self match. Override
 # with PI_REAL=... in the environment if the heuristic picks wrong.
 if [ -z "${PI_REAL:-}" ]; then
-  _self="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+  _self_src="${BASH_SOURCE[0]:-$0}"
+  _self="$(_pi_resolve_abs "$_self_src" || printf '%s' "$_self_src")"
   IFS=':' read -ra _path_dirs <<< "$PATH"
   for _d in "${_path_dirs[@]}"; do
     [ -z "$_d" ] && continue
     _candidate="$_d/pi"
     [ ! -x "$_candidate" ] && continue
-    _resolved="$(readlink -f "$_candidate" 2>/dev/null || echo "$_candidate")"
+    _resolved="$(_pi_resolve_abs "$_candidate" || printf '%s' "$_candidate")"
     if [ "$_resolved" != "$_self" ]; then
       PI_REAL="$_candidate"
       break
