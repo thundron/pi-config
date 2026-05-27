@@ -36,6 +36,7 @@ case "$mode" in
     run_step "execpolicy drift"       $JS_RUNTIME tests/test-execpolicy-drift.mjs
     run_step "execpolicy unit"        $JS_RUNTIME tests/test-execpolicy.mjs
     run_step "guardian tool_call"     $JS_RUNTIME tests/test-guardian-toolcall.mjs
+    run_step "goal runtime race"      $JS_RUNTIME tests/test-goal-mode-runtime-race.mjs
     run_step "context-diet unit"      $JS_RUNTIME tests/test-context-diet.mjs
     run_step "context-diet e2e"       $JS_RUNTIME tests/test-context-diet-e2e.mjs
     ;;
@@ -49,6 +50,7 @@ case "$mode" in
     run_step "execpolicy drift"       $JS_RUNTIME tests/test-execpolicy-drift.mjs
     run_step "execpolicy unit"        $JS_RUNTIME tests/test-execpolicy.mjs
     run_step "guardian tool_call"     $JS_RUNTIME tests/test-guardian-toolcall.mjs
+    run_step "goal runtime race"      $JS_RUNTIME tests/test-goal-mode-runtime-race.mjs
     run_step "context-diet unit"      $JS_RUNTIME tests/test-context-diet.mjs
     run_step "context-diet e2e"       $JS_RUNTIME tests/test-context-diet-e2e.mjs
     run_step "harness (all)"          python3 tests/harness.py

@@ -93,6 +93,15 @@ const MAX_OBJECTIVE_CHARS = 4_000;
 const AUTO_CONTINUE_IDLE_DELAY_MS = 1500;
 /** Required ms with no user input before auto-continue may fire. */
 const USER_INPUT_GRACE_MS = 1000;
+/** How often to poll again when the agent is between runs but Pi is still doing post-run work. */
+const AUTO_CONTINUE_BUSY_RETRY_MS = 1500;
+/**
+ * Auto-compaction runs after `agent_end` but before the prompt promise that
+ * caused that run fully settles. A goal continuation started during that
+ * post-run compaction can overlap Pi's own follow-up `agent.continue()` call
+ * and surface as: Extension "<runtime>" error: Agent is already processing.
+ */
+const AUTO_CONTINUE_COMPACTION_WATCHDOG_MS = 10 * 60 * 1000;
 /** Cap on auto-continues per agent-end to avoid worst-case loops (safety net). */
 const AUTO_CONTINUE_HARD_LIMIT_PER_SESSION = 200;
 const STATUS_KEY = "goal";
@@ -413,6 +422,16 @@ export default function (pi: ExtensionAPI) {
 	let consecutiveErrorEnds = 0;
 	const CONSECUTIVE_ERROR_PAUSE_THRESHOLD = 2;
 
+	/**
+	 * Pi's core may run auto-compaction after `agent_end` while the original
+	 * extension-triggered prompt is still unwinding. During that window
+	 * `ctx.isIdle()` can be true even though starting another prompt may race the
+	 * core post-run continuation path. Track compaction explicitly and hold goal
+	 * auto-continuation until compaction settles.
+	 */
+	let postAgentCompactionInFlight = false;
+	let compactionWatchdogTimer: NodeJS.Timeout | undefined;
+
 	const refresh = (ctx: ExtensionContext) => {
 		goal = reconstructGoal(ctx);
 		// On a fresh reconstruction, decide if we've already wrapped up.
@@ -437,11 +456,20 @@ export default function (pi: ExtensionAPI) {
 		refresh(ctx);
 	});
 
+	pi.on("session_before_compact", async () => {
+		markCompactionInFlight();
+	});
+
+	pi.on("session_compact", async () => {
+		clearCompactionInFlight();
+	});
+
 	pi.on("session_shutdown", async (_event, ctx) => {
 		// Cancel any pending auto-continue timers so they can't fire after the
 		// session is replaced/quit and try to sendUserMessage on a stale state.
 		for (const t of pendingTimers) clearTimeout(t);
 		pendingTimers.clear();
+		clearCompactionInFlight();
 		// Bump generation so any in-flight check that races shutdown sees a
 		// mismatch and bails.
 		autoContinueGeneration += 1;
@@ -561,24 +589,67 @@ export default function (pi: ExtensionAPI) {
 			appendStatus(pi, "paused", { summary: "auto: hard-limit reached" });
 			return;
 		}
+		armContinuationTimer(prompt, pi, ctx, myGen, AUTO_CONTINUE_IDLE_DELAY_MS);
+	}
+
+	function armContinuationTimer(
+		prompt: string,
+		pi: ExtensionAPI,
+		ctx: ExtensionContext,
+		generation: number,
+		delayMs: number,
+	) {
 		const timer: NodeJS.Timeout = setTimeout(() => {
 			pendingTimers.delete(timer);
-			if (myGen !== autoContinueGeneration) return; // preempted by user input or branch switch
-			if (!ctx.isIdle()) return;
-			if (ctx.hasPendingMessages()) return;
-			if (Date.now() - lastUserInputAt < USER_INPUT_GRACE_MS) return;
+			if (generation !== autoContinueGeneration) return; // preempted by user input or branch switch
+
+			if (postAgentCompactionInFlight || !ctx.isIdle() || ctx.hasPendingMessages()) {
+				armContinuationTimer(prompt, pi, ctx, generation, AUTO_CONTINUE_BUSY_RETRY_MS);
+				return;
+			}
+
+			const msSinceUserInput = Date.now() - lastUserInputAt;
+			if (msSinceUserInput < USER_INPUT_GRACE_MS) {
+				armContinuationTimer(
+					prompt,
+					pi,
+					ctx,
+					generation,
+					Math.max(USER_INPUT_GRACE_MS - msSinceUserInput, AUTO_CONTINUE_BUSY_RETRY_MS),
+				);
+				return;
+			}
+
 			// Re-derive once more right before firing, in case a status entry was
 			// appended during the grace window.
 			const live = reconstructGoal(ctx);
 			if (!live) return;
 			if (live.status !== "active" && live.status !== "budget_limited") return;
 			autoContinueCount += 1;
-			pi.sendUserMessage(prompt);
-		}, AUTO_CONTINUE_IDLE_DELAY_MS);
+			pi.sendUserMessage(prompt, { deliverAs: "followUp" });
+		}, delayMs);
 		pendingTimers.add(timer);
 		// Allow node to exit even when the timer is pending (defensive — pi's
 		// runtime keeps the process alive on its own).
 		if (typeof timer.unref === "function") timer.unref();
+	}
+
+	function markCompactionInFlight() {
+		postAgentCompactionInFlight = true;
+		if (compactionWatchdogTimer) clearTimeout(compactionWatchdogTimer);
+		compactionWatchdogTimer = setTimeout(() => {
+			postAgentCompactionInFlight = false;
+			compactionWatchdogTimer = undefined;
+		}, AUTO_CONTINUE_COMPACTION_WATCHDOG_MS);
+		if (typeof compactionWatchdogTimer.unref === "function") {
+			compactionWatchdogTimer.unref();
+		}
+	}
+
+	function clearCompactionInFlight() {
+		postAgentCompactionInFlight = false;
+		if (compactionWatchdogTimer) clearTimeout(compactionWatchdogTimer);
+		compactionWatchdogTimer = undefined;
 	}
 
 	// ─── Model-callable tool: update_goal ────────────────────────────────────
@@ -657,7 +728,7 @@ export default function (pi: ExtensionAPI) {
 				// a continuation — there's no in-flight agent_end to do it for us.
 				if (wasStalled && ctx.isIdle()) {
 					const live = reconstructGoal(ctx);
-					if (live) pi.sendUserMessage(CONTINUATION_PROMPT(live));
+					if (live) scheduleContinuation(CONTINUATION_PROMPT(live), pi, ctx);
 				}
 				return;
 			}
@@ -763,13 +834,14 @@ export default function (pi: ExtensionAPI) {
 				"info",
 			);
 
-			// Immediately engage the agent with the (new) objective. If already
-			// streaming, this becomes a steer; otherwise a fresh turn.
+			// Engage the agent with the (new) objective. If already streaming, this
+			// becomes a steer; otherwise schedule through the same guarded path as
+			// auto-continuation so post-agent compaction cannot race a new prompt.
 			const prompt = wasExisting
 				? OBJECTIVE_UPDATED_PROMPT(goal)
 				: NEW_GOAL_PROMPT(goal);
 			if (ctx.isIdle()) {
-				pi.sendUserMessage(prompt);
+				scheduleContinuation(prompt, pi, ctx);
 			} else {
 				pi.sendUserMessage(prompt, { deliverAs: "steer" });
 			}

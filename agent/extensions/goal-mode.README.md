@@ -19,7 +19,7 @@ patches to pi itself.
 | Persistent goal in `codex-state` SQLite               | `pi.appendEntry("goal/set" / "goal/status", …)` — branch-aware     |
 | `update_goal` tool the model can call                 | `pi.registerTool({ name: "update_goal", … })`                      |
 | Per-turn token accounting                             | `pi.on("turn_end")` reads `event.message.usage.{input,output}`     |
-| Auto-continuation after the agent loop fully settles  | `pi.on("agent_end")` + idle-guarded `setTimeout` + `pi.sendUserMessage(continuation_prompt)` |
+| Auto-continuation after the agent loop fully settles  | `pi.on("agent_end")` + guarded `setTimeout` + compaction/busy polling + `pi.sendUserMessage(..., { deliverAs: "followUp" })` |
 | Budget-limited steering                               | Once `tokensUsed ≥ tokenBudget`, status flips, wrap-up prompt sent |
 | Footer status (`/status`-style)                       | `ctx.ui.setStatus("goal", …)`                                      |
 | Resume across sessions                                | `pi.on("session_start" / "session_tree")` reconstructs from branch entries |
@@ -66,6 +66,9 @@ The model is instructed (via the continuation prompt) to call this only when:
   pending auto-continuation cancels it so we never stomp on a typing user.
 - **Branch-switch invalidation** — `session_tree` events bump the generation
   counter, so an in-flight continuation timer for the old branch is dropped.
+- **Post-run compaction guard** — `session_before_compact` pauses pending
+  continuations until `session_compact` clears, avoiding races with Pi core's
+  post-agent `continue()` path.
 - **Hard cap** — 200 auto-continuations per session as a defense-in-depth
   ceiling.
 
