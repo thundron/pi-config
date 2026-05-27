@@ -447,7 +447,9 @@ export default function (pi: ExtensionAPI) {
 				{ value: "reset", description: "zero the fire counts" },
 			];
 			const p = prefix.trim().toLowerCase();
-			return subs.filter((s) => s.value.startsWith(p));
+			return subs
+				.filter((s) => s.value.startsWith(p))
+				.map((s) => ({ value: s.value, label: s.value, description: s.description }));
 		},
 	});
 }

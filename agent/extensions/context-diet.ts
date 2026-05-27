@@ -5,8 +5,8 @@
 // lean across long sessions. Session-on-disk is never modified — /resume
 // always restores the full history.
 
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
-	AgentMessage,
 	ExtensionAPI,
 	ExtensionCommandContext,
 	ExtensionContext,
@@ -94,7 +94,11 @@ function tokensOf(msgs: AgentMessage[]): number {
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 
-function textOf(content: AgentMessage["content"] | undefined): string {
+// `AgentMessage["content"]` is NOT valid type-wise: AgentMessage is a union
+// that includes `CustomAgentMessages[...]` members which may lack `content`.
+// Accept the shapes we actually see (string or content-block array) via
+// duck-typing.
+function textOf(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
 	let out = "";
@@ -186,17 +190,12 @@ function rewriteToolResult(
 	force: boolean,
 ): { msg: AgentMessage; trimmed: boolean; bytesSaved: number } {
 	if (msg.role !== "toolResult") return { msg, trimmed: false, bytesSaved: 0 };
-	const tr = msg as {
-		role: "toolResult";
-		toolCallId: string;
-		toolName: string;
-		content: Array<Record<string, unknown>>;
-		details?: unknown;
-		isError: boolean;
-		timestamp: number;
-	};
+	// `msg` is now narrowed to ToolResultMessage. Don't re-cast to a wider
+	// content shape; tsc rejects the conversion and the wider shape was lying
+	// anyway (real content is (TextContent|ImageContent)[]).
+	const tr = msg;
 	if (cfg.preserveErrors && tr.isError) return { msg, trimmed: false, bytesSaved: 0 };
-	const origText = textOf(tr.content as AgentMessage["content"]);
+	const origText = textOf(tr.content);
 	const origBytes = byteLen(origText);
 	const eligibleBySize = origBytes > cfg.maxResultBytes;
 	if (!force && !eligibleBySize) return { msg, trimmed: false, bytesSaved: 0 };
@@ -470,7 +469,9 @@ export default function (pi: ExtensionAPI) {
 				{ value: "status", description: "show current config + stats (alias)" },
 			];
 			const p = prefix.trim().toLowerCase();
-			return subs.filter((s) => s.value.startsWith(p));
+			return subs
+				.filter((s) => s.value.startsWith(p))
+				.map((s) => ({ value: s.value, label: s.value, description: s.description }));
 		},
 	});
 

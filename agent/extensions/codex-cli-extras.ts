@@ -397,7 +397,9 @@ export default function (pi: ExtensionAPI) {
 				{ value: "commit", description: "review a specific commit" },
 			];
 			const p = prefix.trim().toLowerCase();
-			return opts.filter((o) => o.value.startsWith(p));
+			return opts
+				.filter((o) => o.value.startsWith(p))
+				.map((o) => ({ value: o.value, label: o.value, description: o.description }));
 		},
 	});
 

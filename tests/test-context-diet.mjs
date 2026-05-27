@@ -7,8 +7,31 @@
 
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Self-respawn under the stub-hook so context-diet.ts's imports of
+// @earendil-works/* (nested deps in pi-coding-agent) resolve under node.
+if (!process.env.PI_CONTEXT_DIET_TEST_BOOTSTRAPPED) {
+	const isBun = typeof globalThis.Bun !== "undefined" || /bun/i.test(process.execPath);
+	if (!isBun) {
+		const hook = resolve(__dirname, "lib", "stub-hook-register.mjs");
+		const r = spawnSync(
+			process.execPath,
+			[
+				"--experimental-strip-types",
+				"--no-warnings=DeprecationWarning",
+				"--import",
+				hook,
+				fileURLToPath(import.meta.url),
+			],
+			{ stdio: "inherit", env: { ...process.env, PI_CONTEXT_DIET_TEST_BOOTSTRAPPED: "1" } },
+		);
+		process.exit(r.status ?? 1);
+	}
+}
+
 const EXT_PATH = resolve(__dirname, "..", "agent", "extensions", "context-diet.ts");
 
 let pass = 0, fail = 0;

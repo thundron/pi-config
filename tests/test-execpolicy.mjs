@@ -99,76 +99,121 @@ const DEFAULT_EXECPOLICY = [
 		justification: "force-branch / update-ref are banned",
 		regex: "\\bgit\\s+(?:branch|update-ref)\\s+-(?:f|B)\\b",
 	},
+	// IMPORTANT: matchPrefix uses EXACT token equality. Patterns like
+	// ["find", "/mnt"] only match `find /mnt` (with `/mnt` as exact arg) and
+	// miss `find /mnt/c/Users`. All filesystem-scan rules below therefore use
+	// a `[<tool>]` prefix and rely on a regex to catch any absolute path that
+	// isn't /tmp[/...]. Shared lookahead: `/(?!tmp\b|tmp/)`.
 	{
-		pattern: ["rm", "-rf", "/"],
-		decision: "forbidden",
-		justification: "rm -rf / is catastrophic",
-		regex: "\\brm\\s+-rf\\s+/(?:\\s|$)",
-	},
-	{
-		pattern: ["find", "/"],
-		decision: "forbidden",
-		justification:
-			"find / scans the entire filesystem (~30+ min on WSL with /mnt/* FUSE mounts). Re-issue with an explicit scope: 'find . -name X' or 'find <specific-dir> -name X'.",
-		regex: "\\bfind\\s+/(?!\\S)",
-	},
-	{
-		pattern: ["find", "/mnt"],
+		pattern: ["rm"],
 		decision: "forbidden",
 		justification:
-			"find /mnt walks WSL DrvFs FUSE mounts (extremely slow, often >5 min). Scope to a specific subdirectory.",
-	},
-	{
-		pattern: ["grep"],
-		decision: "forbidden",
-		justification:
-			"grep -r / scans the entire filesystem. Scope to a specific directory: 'grep -r pattern ./src'.",
+			"rm -r/-rf on absolute system paths is too dangerous without explicit user confirmation. " +
+			"If you really need to wipe an absolute path, cd there first and use a relative target, " +
+			"or run it via /bash with the user's explicit ok. /tmp[/...] is allowed.",
 		regex:
-			"\\bgrep\\s+(?:[^|;&\\n]*\\s+)?-\\S*[rR]\\S*\\s+(?:[^|;&\\n]*\\s+)?/(?!\\S)",
+			"\\brm\\b(?:[^|;&\\n]*?\\s)-\\S*[rR]\\S*\\b[^|;&\\n]*?(?:^|\\s)/(?!tmp\\b|tmp/)",
+	},
+	{
+		pattern: ["find"],
+		decision: "forbidden",
+		justification:
+			"find on absolute system paths walks the entire filesystem (or WSL DrvFs FUSE mounts on /mnt, often >5 min). " +
+			"Allowed: relative paths (`.`, `./src`, `ggml/src/...`) and /tmp[/...]. " +
+			"If you need a specific dir, cd into it first or pass a relative path.",
+		regex: "\\bfind\\b[^|;&\\n]*?(?:^|\\s)/(?!tmp\\b|tmp/)",
 	},
 	{
 		pattern: ["rg"],
 		decision: "forbidden",
 		justification:
-			"rg from / scans the entire filesystem. Scope it: 'rg pattern ./src' or just 'rg pattern' (rg defaults to cwd).",
-		regex: "\\brg\\s+(?:[^|;&\\n]*\\s+)?/(?!\\S)",
+			"rg on absolute system paths walks the entire filesystem (or WSL DrvFs on /mnt). " +
+			"Use a relative scope: 'rg pattern ./src' or just 'rg pattern' (rg defaults to cwd). /tmp[/...] is allowed.",
+		regex: "\\brg\\b[^|;&\\n]*?(?:^|\\s)/(?!tmp\\b|tmp/)",
 	},
 	{
-		pattern: ["rg", "/mnt"],
+		pattern: ["grep"],
 		decision: "forbidden",
-		justification: "rg on /mnt walks WSL FUSE mounts. Scope it.",
+		justification:
+			"grep -r on absolute system paths scans the entire filesystem. " +
+			"Scope it: 'grep -r pattern ./src'. /tmp[/...] is allowed.",
+		regex:
+			"\\bgrep\\b(?:[^|;&\\n]*?\\s)-\\S*[rR]\\S*\\b[^|;&\\n]*?(?:^|\\s)/(?!tmp\\b|tmp/)",
 	},
 	{
 		pattern: [["du", "tree"]],
 		decision: "forbidden",
 		justification:
-			"du / and tree / scan the entire filesystem. Scope to a specific directory.",
-		regex: "\\b(?:du|tree)\\s+(?:-\\S+\\s+)*/(?!\\S)",
+			"du/tree on absolute system paths scans the entire filesystem. /tmp[/...] is allowed.",
+		regex: "\\b(?:du|tree)\\b[^|;&\\n]*?(?:^|\\s)/(?!tmp\\b|tmp/)",
 	},
 ];
 
 // ─── Test cases ────────────────────────────────────────────────────────────
 
 const outsideCases = [
-	["find / -name foo", true, "find / -name foo should be blocked"],
-	["find / -maxdepth 1", true, "find / -maxdepth 1 should be blocked"],
-	["find . -name foo", false, "find . -name foo should be allowed"],
-	["find /tmp -name x", false, "find /tmp -name x should be allowed"],
-	["find /mnt -name x", true, "find /mnt should be blocked"],
-	["rm -rf /", true, "rm -rf / should be blocked"],
-	["rm -rf ./build", false, "rm -rf ./build should be allowed"],
-	["grep -r foo /", true, "grep -r foo / should be blocked"],
-	["grep -r foo ./src", false, "grep -r foo ./src should be allowed"],
-	["rg foo /", true, "rg foo / should be blocked"],
-	["rg foo", false, "rg foo (defaults to cwd) should be allowed"],
-	["du / -sh", true, "du / -sh should be blocked"],
-	["du -sh ./build", false, "du -sh ./build should be allowed"],
-	["tree /", true, "tree / should be blocked"],
-	// Chained commands: forbidden segment anywhere blocks
-	["echo hi && rm -rf /", true, "chained rm -rf / via && should be blocked"],
-	["cd foo; find /", true, "chained find / via ; should be blocked"],
-	// Outside sub-agent, git push is gated out (apply filter below)
-	["git push origin main", false, "git push outside sub-agent should be allowed"],
+	// ─── find ───────────────────────────────────────────────────────────────────
+	["find / -name foo", true, "find /"],
+	["find / -maxdepth 1", true, "find / with flags"],
+	["find . -name foo", false, "find . (relative)"],
+	["find ./src -name x", false, "find ./src (relative)"],
+	["find ggml/src/ggml-compositor -name '*.cpp'", false, "find relative subdir"],
+	["find /tmp -name x", false, "find /tmp"],
+	["find /tmp/foo -name x", false, "find /tmp/foo"],
+	["find /mnt -name x", true, "find /mnt (bare)"],
+	// ←— the actual commands that slipped through into the user's session
+	["find /mnt/c/Users -name '*.gguf' 2>/dev/null | head -20", true, "find /mnt/c/Users (WSL drive subpath)"],
+	["find /mnt/c/Users/thund -name '*qwen3*0.8*.gguf'", true, "find /mnt/c subpath with glob"],
+	["find -L /mnt/c/Users -name x", true, "find with flag then /mnt subpath"],
+	["find /home/thund/cache -name x", true, "find /home subpath"],
+	["find /var/log -name x", true, "find /var subpath"],
+	["find /etc -name x", true, "find /etc"],
+	["find /Users/x -name foo", true, "find /Users (macOS)"],
+	["find /usr/lib -name foo", true, "find /usr subpath"],
+	// ─── rg ───────────────────────────────────────────────────────────────────────
+	["rg foo /", true, "rg foo /"],
+	["rg foo /mnt/c/Users", true, "rg /mnt subpath"],
+	["rg foo /home/x", true, "rg /home subpath"],
+	["rg foo /var/log/syslog", true, "rg /var subpath"],
+	["rg foo", false, "rg foo (cwd default)"],
+	["rg foo ./src", false, "rg foo ./src"],
+	["rg foo /tmp", false, "rg /tmp"],
+	["rg foo /tmp/build", false, "rg /tmp/build"],
+	// ─── grep -r ────────────────────────────────────────────────────────────────
+	["grep -r foo /", true, "grep -r foo /"],
+	["grep -r foo /mnt/c", true, "grep -r /mnt subpath"],
+	["grep -r foo /home/x", true, "grep -r /home subpath"],
+	["grep -rn foo /var/log", true, "grep -rn /var subpath (-rn combined flag)"],
+	["grep -r foo ./src", false, "grep -r foo ./src"],
+	["grep -r foo /tmp/build", false, "grep -r /tmp/build"],
+	["grep foo file.txt", false, "grep (non-r) untouched"],
+	// ─── du / tree ──────────────────────────────────────────────────────────────
+	["du / -sh", true, "du /"],
+	["du -sh ./build", false, "du -sh ./build"],
+	["du -sh /home/x", true, "du /home subpath"],
+	["du -sh /tmp/foo", false, "du /tmp/foo"],
+	["tree /", true, "tree /"],
+	["tree /mnt/c", true, "tree /mnt subpath"],
+	["tree ./src", false, "tree ./src"],
+	// ─── rm -rf ────────────────────────────────────────────────────────────────
+	["rm -rf /", true, "rm -rf /"],
+	["rm -rf /home/x", true, "rm -rf /home subpath (used to slip through)"],
+	["rm -rf /var/cache/foo", true, "rm -rf /var subpath (used to slip through)"],
+	["rm -rf /mnt/c/Users/x", true, "rm -rf /mnt subpath"],
+	["rm -rf ./build", false, "rm -rf ./build (relative)"],
+	["rm -rf /tmp/foo", false, "rm -rf /tmp/foo (allow-listed)"],
+	["rm -fr /etc", true, "rm -fr /etc (flag order)"],
+	["rm -r /usr/local", true, "rm -r /usr (just -r, no f)"],
+	["rm file.txt", false, "plain rm (no -r) untouched"],
+	// ─── chains ────────────────────────────────────────────────────────────────
+	["echo hi && rm -rf /", true, "chained rm -rf / via &&"],
+	["cd foo; find /", true, "chained find / via ;"],
+	["cd foo; find /mnt/c/Users", true, "chained find /mnt subpath via ;"],
+	["echo go | rg foo /home", true, "chained rg /home via |"],
+	// ─── negative-case sanity ────────────────────────────────────────────────────
+	["echo /etc/passwd", false, "echo with /etc literal (no find/rg/grep)"],
+	["cat /etc/passwd", false, "cat with /etc (read, not scan)"],
+	["git push origin main", false, "git push outside sub-agent"],
 ];
 
 const insideCases = [

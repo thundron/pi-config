@@ -361,7 +361,9 @@ export default function (pi: ExtensionAPI) {
 				{ value: "show", description: "print MEMORY.md content" },
 			];
 			const p = prefix.trim().toLowerCase();
-			return subs.filter((s) => s.value.startsWith(p));
+			return subs
+				.filter((s) => s.value.startsWith(p))
+				.map((s) => ({ value: s.value, label: s.value, description: s.description }));
 		},
 	});
 }

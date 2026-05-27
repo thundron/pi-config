@@ -743,10 +743,13 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			const abortPromise = new Promise<"abort">((resolve) => {
-				if (signal.aborted) resolve("abort");
-				else signal.addEventListener("abort", () => resolve("abort"), { once: true });
-			});
+			// `signal` is `AbortSignal | undefined` — only wire abort handling when present.
+			const abortPromise: Promise<"abort"> = signal
+				? new Promise<"abort">((resolve) => {
+						if (signal.aborted) resolve("abort");
+						else signal.addEventListener("abort", () => resolve("abort"), { once: true });
+					})
+				: new Promise<"abort">(() => {}); // never resolves — no abort source
 			const timeoutPromise = args.timeout_ms
 				? new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), args.timeout_ms))
 				: new Promise<never>(() => {});
@@ -979,7 +982,9 @@ export default function (pi: ExtensionAPI) {
 			];
 			if (prefix.includes(" ")) return null;
 			const p = prefix.trim().toLowerCase();
-			return subs.filter((s) => s.value.startsWith(p));
+			return subs
+				.filter((s) => s.value.startsWith(p))
+				.map((s) => ({ value: s.value, label: s.value, description: s.description }));
 		},
 	});
 

@@ -219,7 +219,9 @@ export default function (pi: ExtensionAPI) {
 				{ value: "show", description: "list available pets" },
 			];
 			const p = prefix.trim().toLowerCase();
-			return opts.filter((o) => o.value.startsWith(p));
+			return opts
+				.filter((o) => o.value.startsWith(p))
+				.map((o) => ({ value: o.value, label: o.value, description: o.description }));
 		},
 	});
 }

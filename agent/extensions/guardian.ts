@@ -187,53 +187,74 @@ const DEFAULT_EXECPOLICY: ExecPolicyRule[] = [
 	},
 
 	// catastrophic destruction
+	//
+	// IMPORTANT: matchPrefix uses EXACT token equality. A rule pattern of
+	// ["rm", "-rf", "/"] would only match `rm -rf /` (with `/` alone) and
+	// MISS `rm -rf /home/x`, `rm -rf /var/cache/foo`, `rm -rf /mnt/c/...`, etc.
+	// All filesystem-scan / destruction rules below therefore drop the literal
+	// path token from the prefix and rely on the regex to catch any absolute
+	// system path. Allow-list: /tmp[/...] (small, regularly cleaned).
+	//
+	// Regex idiom shared across the rules below:
+	//   `(?:^|\s)/(?!tmp\b|tmp/)`
+	// = a `/` preceded by start-of-segment or whitespace, NOT followed by
+	//   `tmp` + word-boundary (so `/tmp`, `/tmp ` allowed) or `tmp/` (so
+	//   `/tmp/foo` allowed). Everything else (`/`, `/mnt/c/...`, `/home/x`,
+	//   `/var/log/...`, `/etc/...`) matches and is blocked.
 	{
-		pattern: ["rm", "-rf", "/"],
+		pattern: ["rm"],
 		decision: "forbidden",
-		justification: "rm -rf / is catastrophic",
-		regex: "\\brm\\s+-rf\\s+/(?:\\s|$)",
+		justification:
+			"rm -r/-rf on absolute system paths is too dangerous without explicit user confirmation. " +
+			"If you really need to wipe an absolute path, cd there first and use a relative target, " +
+			"or run it via /bash with the user's explicit ok. /tmp[/...] is allowed.",
+		// Require `rm` + an -r/-rf/-R/-fr flag SOMEWHERE before the path, then
+		// a path that starts with `/` and is not `/tmp[/...]`. Plain `rm <file>`
+		// (no -r) is untouched.
+		regex:
+			"\\brm\\b(?:[^|;&\\n]*?\\s)-\\S*[rR]\\S*\\b[^|;&\\n]*?(?:^|\\s)/(?!tmp\\b|tmp/)",
 	},
 
 	// filesystem-scan bans
+	//
+	// One rule per scanner tool. Each catches `<tool> <abs-path>` for any
+	// abs-path except /tmp[/...]. Replaces the old per-path rules (["find",
+	// "/"], ["find", "/mnt"], ["rg", "/mnt"], etc.) which only matched the
+	// bare path token — letting `find /mnt/c/Users`, `find /home/x`,
+	// `rg /var/log/...` slip through.
 	{
-		pattern: ["find", "/"],
+		pattern: ["find"],
 		decision: "forbidden",
 		justification:
-			"find / scans the entire filesystem (~30+ min on WSL with /mnt/* FUSE mounts). Re-issue with an explicit scope: 'find . -name X' or 'find <specific-dir> -name X'.",
-		regex: "\\bfind\\s+/(?!\\S)",
-	},
-	{
-		pattern: ["find", "/mnt"],
-		decision: "forbidden",
-		justification:
-			"find /mnt walks WSL DrvFs FUSE mounts (extremely slow, often >5 min). Scope to a specific subdirectory.",
-	},
-	{
-		pattern: ["grep"],
-		decision: "forbidden",
-		justification:
-			"grep -r / scans the entire filesystem. Scope to a specific directory: 'grep -r pattern ./src'.",
-		regex:
-			"\\bgrep\\s+(?:[^|;&\\n]*\\s+)?-\\S*[rR]\\S*\\s+(?:[^|;&\\n]*\\s+)?/(?!\\S)",
+			"find on absolute system paths walks the entire filesystem (or WSL DrvFs FUSE mounts on /mnt, often >5 min). " +
+			"Allowed: relative paths (`.`, `./src`, `ggml/src/...`) and /tmp[/...]. " +
+			"If you need a specific dir, cd into it first or pass a relative path.",
+		regex: "\\bfind\\b[^|;&\\n]*?(?:^|\\s)/(?!tmp\\b|tmp/)",
 	},
 	{
 		pattern: ["rg"],
 		decision: "forbidden",
 		justification:
-			"rg from / scans the entire filesystem. Scope it: 'rg pattern ./src' or just 'rg pattern' (rg defaults to cwd).",
-		regex: "\\brg\\s+(?:[^|;&\\n]*\\s+)?/(?!\\S)",
+			"rg on absolute system paths walks the entire filesystem (or WSL DrvFs on /mnt). " +
+			"Use a relative scope: 'rg pattern ./src' or just 'rg pattern' (rg defaults to cwd). /tmp[/...] is allowed.",
+		regex: "\\brg\\b[^|;&\\n]*?(?:^|\\s)/(?!tmp\\b|tmp/)",
 	},
 	{
-		pattern: ["rg", "/mnt"],
+		pattern: ["grep"],
 		decision: "forbidden",
-		justification: "rg on /mnt walks WSL FUSE mounts. Scope it.",
+		justification:
+			"grep -r on absolute system paths scans the entire filesystem. " +
+			"Scope it: 'grep -r pattern ./src'. /tmp[/...] is allowed.",
+		// Require -r/-R flag SOMEWHERE in the args, then an abs path that's not /tmp.
+		regex:
+			"\\bgrep\\b(?:[^|;&\\n]*?\\s)-\\S*[rR]\\S*\\b[^|;&\\n]*?(?:^|\\s)/(?!tmp\\b|tmp/)",
 	},
 	{
 		pattern: [["du", "tree"]],
 		decision: "forbidden",
 		justification:
-			"du / and tree / scan the entire filesystem. Scope to a specific directory.",
-		regex: "\\b(?:du|tree)\\s+(?:-\\S+\\s+)*/(?!\\S)",
+			"du/tree on absolute system paths scans the entire filesystem. /tmp[/...] is allowed.",
+		regex: "\\b(?:du|tree)\\b[^|;&\\n]*?(?:^|\\s)/(?!tmp\\b|tmp/)",
 	},
 ];
 

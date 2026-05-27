@@ -25,6 +25,31 @@
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
+
+// Self-respawn under the stub-hook so guardian.ts's imports of
+// @earendil-works/pi-coding-agent (which lives in pi-coding-agent's nested
+// node_modules) resolve to no-op stubs under stand-alone node. Bun follows
+// nested deps natively and skips this branch.
+const __dirname0 = dirname(fileURLToPath(import.meta.url));
+if (!process.env.PI_GUARDIAN_TEST_BOOTSTRAPPED) {
+	const isBun = typeof globalThis.Bun !== "undefined" || /bun/i.test(process.execPath);
+	if (!isBun) {
+		const hook = resolve(__dirname0, "lib", "stub-hook-register.mjs");
+		const r = spawnSync(
+			process.execPath,
+			[
+				"--experimental-strip-types",
+				"--no-warnings=DeprecationWarning",
+				"--import",
+				hook,
+				fileURLToPath(import.meta.url),
+			],
+			{ stdio: "inherit", env: { ...process.env, PI_GUARDIAN_TEST_BOOTSTRAPPED: "1" } },
+		);
+		process.exit(r.status ?? 1);
+	}
+}
 
 // Locate the guardian.ts file relative to this test file's location so
 // the test works from any CWD (including a fresh `git clone`).
@@ -111,6 +136,29 @@ const outsideCases = [
 	["allow git status", "git status", false],
 	["allow echo hi", "echo hi", false],
 	["forbid find /mnt (WSL guard)", "find /mnt -name x", true],
+	// ←— actual commands that escaped guardian into a real session before the
+	// matcher-bug fix. Keep these as regression tests.
+	[
+		"forbid find /mnt/c/Users (WSL subpath — actual escape)",
+		"find /mnt/c/Users -name '*.gguf' 2>/dev/null | head -20",
+		true,
+	],
+	[
+		"forbid find /mnt/c/Users/thund (multi-name find — actual escape)",
+		"find /mnt/c/Users/thund -name '*qwen3*0.8*.gguf' -o -name '*Qwen3*0.8*.gguf' -o -name '*qwen35*.gguf' 2>/dev/null | head -10",
+		true,
+	],
+	["forbid find /home subpath", "find /home/thund/cache -name x", true],
+	["forbid find /var/log", "find /var/log -name x", true],
+	["forbid find /etc", "find /etc -name foo", true],
+	["forbid rg /mnt subpath", "rg foo /mnt/c/Users", true],
+	["forbid rg /home subpath", "rg foo /home/x", true],
+	["forbid grep -r /home", "grep -rn foo /home/x", true],
+	["forbid rm -rf /home subpath", "rm -rf /home/x", true],
+	["forbid rm -rf /var/cache subpath", "rm -rf /var/cache/foo", true],
+	["forbid du /home subpath", "du -sh /home/x", true],
+	["allow rm -rf /tmp/foo", "rm -rf /tmp/foo", false],
+	["allow find /tmp/build", "find /tmp/build -name x", false],
 	["allow git branch (no -f)", "git branch", false],
 	["forbid git branch -f", "git branch -f main HEAD", true],
 ];

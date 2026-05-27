@@ -788,9 +788,11 @@ export default function (pi: ExtensionAPI) {
 			const p = prefix.trim().toLowerCase();
 			// Only complete the FIRST token of the args.
 			if (p.includes(" ")) return null;
+			// NOTE: pi-tui's AutocompleteItem requires `label: string` — without it,
+			// CombinedAutocompleteProvider.applyCompletion crashes on `item.label.endsWith("/")`.
 			return subs
 				.filter((s) => s.value.startsWith(p))
-				.map((s) => ({ value: s.value, displayValue: s.value, description: s.description }));
+				.map((s) => ({ value: s.value, label: s.value, description: s.description }));
 		},
 	});
 }

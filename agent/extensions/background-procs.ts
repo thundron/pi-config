@@ -260,11 +260,11 @@ export default function (pi: ExtensionAPI) {
 		const cmd = entry?.cmd;
 		if (!cmd || !commandBackgrounded(cmd)) return;
 
-		// Pull text from the result content. The shape is { content: [{type,text}] }.
-		const result = event.result as { content?: Array<{ type?: string; text?: string }> };
-		const text = (result?.content ?? [])
-			.filter((c) => c.type === "text" && typeof c.text === "string")
-			.map((c) => c.text as string)
+		// ToolResultEvent.content is on the event itself — there is no `event.result`.
+		// (Earlier code used `event.result.content` which is undefined.content → silently drops everything.)
+		const text = (event.content ?? [])
+			.filter((c): c is { type: "text"; text: string } => c.type === "text" && typeof (c as { text?: unknown }).text === "string")
+			.map((c) => c.text)
 			.join("\n");
 		if (!text) return;
 
@@ -360,8 +360,13 @@ export default function (pi: ExtensionAPI) {
 			if (prefix.includes(" ")) return null;
 			const p = prefix.trim().toLowerCase();
 			const ids = [...procs.keys()].filter((id) => id.startsWith(p));
-			const opts = ids.map((id) => ({ value: id, description: `pid ${procs.get(id)?.pid}` }));
-			if ("all".startsWith(p)) opts.push({ value: "all", description: "SIGTERM every tracked" });
+			const opts = ids.map((id) => ({
+				value: id,
+				label: id,
+				description: `pid ${procs.get(id)?.pid}`,
+			}));
+			if ("all".startsWith(p))
+				opts.push({ value: "all", label: "all", description: "SIGTERM every tracked" });
 			return opts;
 		},
 	});

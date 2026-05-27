@@ -31,6 +31,9 @@ case "$mode" in
     exit 0
     ;;
   --quick)
+    run_step "typecheck"              $JS_RUNTIME tests/test-typecheck.mjs
+    run_step "autocomplete contract"  $JS_RUNTIME tests/test-autocomplete.mjs
+    run_step "execpolicy drift"       $JS_RUNTIME tests/test-execpolicy-drift.mjs
     run_step "execpolicy unit"        $JS_RUNTIME tests/test-execpolicy.mjs
     run_step "guardian tool_call"     $JS_RUNTIME tests/test-guardian-toolcall.mjs
     run_step "context-diet unit"      $JS_RUNTIME tests/test-context-diet.mjs
@@ -41,6 +44,9 @@ case "$mode" in
     run_step "harness ($*)"           python3 tests/harness.py "$@"
     ;;
   all|"")
+    run_step "typecheck"              $JS_RUNTIME tests/test-typecheck.mjs
+    run_step "autocomplete contract"  $JS_RUNTIME tests/test-autocomplete.mjs
+    run_step "execpolicy drift"       $JS_RUNTIME tests/test-execpolicy-drift.mjs
     run_step "execpolicy unit"        $JS_RUNTIME tests/test-execpolicy.mjs
     run_step "guardian tool_call"     $JS_RUNTIME tests/test-guardian-toolcall.mjs
     run_step "context-diet unit"      $JS_RUNTIME tests/test-context-diet.mjs
