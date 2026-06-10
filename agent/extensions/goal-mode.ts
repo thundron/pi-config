@@ -96,6 +96,13 @@ const USER_INPUT_GRACE_MS = 1000;
 /** How often to poll again when the agent is between runs but Pi is still doing post-run work. */
 const AUTO_CONTINUE_BUSY_RETRY_MS = 1500;
 /**
+ * After `session_compact`, Pi core may still synchronously decide to call
+ * `agent.continue()` for an overflow retry / queued message. Keep goal
+ * continuation held briefly so it cannot win that race and leave core trying
+ * to continue from our newly-created assistant leaf.
+ */
+const AUTO_CONTINUE_COMPACTION_SETTLE_MS = 1500;
+/**
  * Auto-compaction runs after `agent_end` but before the prompt promise that
  * caused that run fully settles. A goal continuation started during that
  * post-run compaction can overlap Pi's own follow-up `agent.continue()` call
@@ -430,6 +437,7 @@ export default function (pi: ExtensionAPI) {
 	 * auto-continuation until compaction settles.
 	 */
 	let postAgentCompactionInFlight = false;
+	let compactionSettleTimer: NodeJS.Timeout | undefined;
 	let compactionWatchdogTimer: NodeJS.Timeout | undefined;
 
 	const refresh = (ctx: ExtensionContext) => {
@@ -461,7 +469,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_compact", async () => {
-		clearCompactionInFlight();
+		scheduleCompactionClear();
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
@@ -636,6 +644,8 @@ export default function (pi: ExtensionAPI) {
 
 	function markCompactionInFlight() {
 		postAgentCompactionInFlight = true;
+		if (compactionSettleTimer) clearTimeout(compactionSettleTimer);
+		compactionSettleTimer = undefined;
 		if (compactionWatchdogTimer) clearTimeout(compactionWatchdogTimer);
 		compactionWatchdogTimer = setTimeout(() => {
 			postAgentCompactionInFlight = false;
@@ -646,8 +656,20 @@ export default function (pi: ExtensionAPI) {
 		}
 	}
 
+	function scheduleCompactionClear() {
+		if (compactionSettleTimer) clearTimeout(compactionSettleTimer);
+		compactionSettleTimer = setTimeout(() => {
+			clearCompactionInFlight();
+		}, AUTO_CONTINUE_COMPACTION_SETTLE_MS);
+		if (typeof compactionSettleTimer.unref === "function") {
+			compactionSettleTimer.unref();
+		}
+	}
+
 	function clearCompactionInFlight() {
 		postAgentCompactionInFlight = false;
+		if (compactionSettleTimer) clearTimeout(compactionSettleTimer);
+		compactionSettleTimer = undefined;
 		if (compactionWatchdogTimer) clearTimeout(compactionWatchdogTimer);
 		compactionWatchdogTimer = undefined;
 	}

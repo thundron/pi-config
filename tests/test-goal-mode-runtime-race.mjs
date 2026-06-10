@@ -26,8 +26,12 @@ assert(
 	"goal-mode must mark post-agent compaction as in-flight",
 );
 assert(
-	src.includes('pi.on("session_compact"') && src.includes("clearCompactionInFlight"),
-	"goal-mode must clear the compaction guard after compaction succeeds",
+	src.includes('pi.on("session_compact"') && src.includes("scheduleCompactionClear"),
+	"goal-mode must keep the compaction guard through a post-compaction settle delay",
+);
+assert(
+	src.includes("AUTO_CONTINUE_COMPACTION_SETTLE_MS") && src.includes("compactionSettleTimer"),
+	"goal-mode must delay clearing the compaction guard so Pi core can run post-compaction continue() first",
 );
 assert(
 	src.includes("postAgentCompactionInFlight || !ctx.isIdle() || ctx.hasPendingMessages()"),

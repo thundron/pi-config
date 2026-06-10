@@ -67,8 +67,8 @@ The model is instructed (via the continuation prompt) to call this only when:
 - **Branch-switch invalidation** — `session_tree` events bump the generation
   counter, so an in-flight continuation timer for the old branch is dropped.
 - **Post-run compaction guard** — `session_before_compact` pauses pending
-  continuations until `session_compact` clears, avoiding races with Pi core's
-  post-agent `continue()` path.
+  continuations until shortly after `session_compact`, avoiding races with Pi
+  core's post-agent `continue()` path.
 - **Hard cap** — 200 auto-continuations per session as a defense-in-depth
   ceiling.
 
