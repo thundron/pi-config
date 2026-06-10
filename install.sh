@@ -173,6 +173,8 @@ link "$HOME/.pi/agent/extensions/terminal-title.ts"       "agent/extensions/term
 link "$HOME/.pi/agent/extensions/pets.ts"                 "agent/extensions/pets.ts"
 link "$HOME/.pi/agent/extensions/context-diet.ts"         "agent/extensions/context-diet.ts"
 link "$HOME/.pi/agent/extensions/context-diet.README.md"  "agent/extensions/context-diet.README.md"
+link "$HOME/.pi/agent/extensions/compaction-diet.ts"      "agent/extensions/compaction-diet.ts"
+link "$HOME/.pi/agent/extensions/compaction-diet.README.md" "agent/extensions/compaction-diet.README.md"
 link "$HOME/.pi/agent/skills/claude-code/SKILL.md"        "agent/skills/claude-code/SKILL.md"
 link "$HOME/.pi/agent/skills/subagents/SKILL.md"         "agent/skills/subagents/SKILL.md"
 link "$HOME/.pi/agent/roles/awaiter.json"                 "agent/roles/awaiter.json"

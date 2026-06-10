@@ -4,6 +4,12 @@
 // then read /context-diet and assert the extension actually ran in-process
 // (calls processed > 0). The trimming math itself is covered exhaustively by
 // tests/test-context-diet.mjs against the same factory.
+//
+// Driven by RPC events, not fixed sleeps: it waits for pi to signal readiness,
+// for the prompt's turn to end, and for the stats notify to arrive. That keeps
+// it deterministic even when the machine is busy (e.g. running in the full
+// suite right after the typecheck/tsc step), where a fixed warmup would race
+// pi's startup and the prompt would land before the agent loop is ready.
 // Usage: bun run tests/test-context-diet-e2e.mjs
 
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
@@ -23,7 +29,12 @@ const proc = spawn(
 	{ env, cwd: ROOT, stdio: ["pipe", "pipe", "pipe"] },
 );
 
-let statsDumpText = "";
+// ─── event-driven RPC reader ───────────────────────────────────────────────
+// Collect every parsed RPC object; waitFor() resolves against already-seen
+// objects or the next one that matches, and rejects after a generous timeout.
+
+const events = [];
+const waiters = [];
 let buf = "";
 proc.stdout.setEncoding("utf8");
 proc.stdout.on("data", (chunk) => {
@@ -35,28 +46,65 @@ proc.stdout.on("data", (chunk) => {
 		if (!line.trim()) continue;
 		let obj;
 		try { obj = JSON.parse(line); } catch { continue; }
-		if (obj.method === "notify" && (obj.message || "").includes("calls processed")) {
-			statsDumpText = obj.message;
+		events.push(obj);
+		for (let i = waiters.length - 1; i >= 0; i--) {
+			if (waiters[i].pred(obj)) {
+				clearTimeout(waiters[i].timer);
+				waiters[i].resolve(obj);
+				waiters.splice(i, 1);
+			}
 		}
 	}
 });
 proc.stderr.on("data", () => {});
 
-await new Promise((r) => setTimeout(r, 1800)); // warmup
-// One prompt → triggers agent loop → context event fires (even in offline mode,
-// pi still goes through the agent loop; the LLM call errors out but `context`
-// has already fired before that).
-proc.stdin.write(JSON.stringify({ id: "p1", type: "prompt", message: "hello" }) + "\n");
-await new Promise((r) => setTimeout(r, 3000));
-proc.stdin.write(JSON.stringify({ id: "p2", type: "prompt", message: "/context-diet" }) + "\n");
-await new Promise((r) => setTimeout(r, 1500));
-proc.stdin.write(JSON.stringify({ id: "end", type: "abort" }) + "\n");
-await new Promise((r) => setTimeout(r, 500));
+function waitFor(pred, timeoutMs, label) {
+	const existing = events.find(pred);
+	if (existing) return Promise.resolve(existing);
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			const idx = waiters.findIndex((w) => w.timer === timer);
+			if (idx >= 0) waiters.splice(idx, 1);
+			reject(new Error(`timed out after ${timeoutMs}ms waiting for: ${label}`));
+		}, timeoutMs);
+		waiters.push({ pred, resolve, timer });
+	});
+}
+
+function send(msg) {
+	proc.stdin.write(JSON.stringify(msg) + "\n");
+}
+
+const isStatus = (key) => (o) => o.method === "setStatus" && o.statusKey === key;
+const isAgentEnd = (o) => o.type === "agent_end";
+const isStatsNotify = (o) => o.method === "notify" && typeof o.message === "string" && o.message.includes("calls processed");
+
+let statsDumpText = "";
+let setupError = "";
+try {
+	// 1. Extensions loaded → context-diet emits its initial footer status.
+	await waitFor(isStatus("context-diet"), 20000, "context-diet extension to load");
+	// 2. One prompt → agent loop runs → `context` fires before the (offline) LLM
+	//    call errors out. agent_end marks the turn complete.
+	send({ id: "p1", type: "prompt", message: "hello" });
+	await waitFor(isAgentEnd, 30000, "p1 turn to end (agent_end)");
+	// 3. Ask the extension to dump its stats and wait for the notify.
+	send({ id: "p2", type: "prompt", message: "/context-diet" });
+	const notify = await waitFor(isStatsNotify, 20000, "/context-diet stats notify");
+	statsDumpText = notify.message;
+} catch (e) {
+	setupError = e instanceof Error ? e.message : String(e);
+}
+
+send({ id: "end", type: "abort" });
 try { proc.stdin.end(); } catch {}
-await new Promise((r) => { proc.on("exit", r); setTimeout(r, 3000); });
+await new Promise((r) => {
+	proc.on("exit", r);
+	setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} r(); }, 3000);
+});
 
 console.log("=== /context-diet output captured ===");
-console.log(statsDumpText || "(no stats notify captured)");
+console.log(statsDumpText || `(no stats notify captured${setupError ? `: ${setupError}` : ""})`);
 
 function pluck(s, key) {
 	const m = s.match(new RegExp(`^${key}\\s*[:=]\\s*(.+)$`, "m"));
@@ -74,7 +122,7 @@ function ok(label, cond, hint = "") {
 }
 
 console.log("\n=== assertions ===");
-ok("status notify captured (extension loaded in real pi)", statsDumpText !== "");
+ok("status notify captured (extension loaded in real pi)", statsDumpText !== "", setupError);
 ok("context event fired at least once during the LLM call (calls processed > 0)",
    calls > 0, `calls=${calls}`);
 ok("token counter is non-zero (proves estimateTokens import succeeded)",
