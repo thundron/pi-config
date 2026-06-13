@@ -175,6 +175,8 @@ link "$HOME/.pi/agent/extensions/context-diet.ts"         "agent/extensions/cont
 link "$HOME/.pi/agent/extensions/context-diet.README.md"  "agent/extensions/context-diet.README.md"
 link "$HOME/.pi/agent/extensions/compaction-diet.ts"      "agent/extensions/compaction-diet.ts"
 link "$HOME/.pi/agent/extensions/compaction-diet.README.md" "agent/extensions/compaction-diet.README.md"
+link "$HOME/.pi/agent/extensions/tool-pairing-guard.ts"   "agent/extensions/tool-pairing-guard.ts"
+link "$HOME/.pi/agent/extensions/tool-pairing-guard.README.md" "agent/extensions/tool-pairing-guard.README.md"
 link "$HOME/.pi/agent/skills/claude-code/SKILL.md"        "agent/skills/claude-code/SKILL.md"
 link "$HOME/.pi/agent/skills/subagents/SKILL.md"         "agent/skills/subagents/SKILL.md"
 link "$HOME/.pi/agent/roles/awaiter.json"                 "agent/roles/awaiter.json"
