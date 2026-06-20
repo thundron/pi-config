@@ -37,6 +37,9 @@ case "$mode" in
     run_step "execpolicy unit"        $JS_RUNTIME tests/test-execpolicy.mjs
     run_step "guardian tool_call"     $JS_RUNTIME tests/test-guardian-toolcall.mjs
     run_step "goal runtime race"      $JS_RUNTIME tests/test-goal-mode-runtime-race.mjs
+    run_step "plan-mode prompt"       $JS_RUNTIME tests/test-plan-mode-prompt.mjs
+    run_step "terminal-title"         $JS_RUNTIME tests/test-terminal-title.mjs
+    run_step "context-tools"          $JS_RUNTIME tests/test-context-tools.mjs
     run_step "context-diet unit"      $JS_RUNTIME tests/test-context-diet.mjs
     run_step "compaction-diet unit"   $JS_RUNTIME tests/test-compaction-diet.mjs
     run_step "context-diet e2e"       $JS_RUNTIME tests/test-context-diet-e2e.mjs
@@ -53,6 +56,9 @@ case "$mode" in
     run_step "execpolicy unit"        $JS_RUNTIME tests/test-execpolicy.mjs
     run_step "guardian tool_call"     $JS_RUNTIME tests/test-guardian-toolcall.mjs
     run_step "goal runtime race"      $JS_RUNTIME tests/test-goal-mode-runtime-race.mjs
+    run_step "plan-mode prompt"       $JS_RUNTIME tests/test-plan-mode-prompt.mjs
+    run_step "terminal-title"         $JS_RUNTIME tests/test-terminal-title.mjs
+    run_step "context-tools"          $JS_RUNTIME tests/test-context-tools.mjs
     run_step "context-diet unit"      $JS_RUNTIME tests/test-context-diet.mjs
     run_step "compaction-diet unit"   $JS_RUNTIME tests/test-compaction-diet.mjs
     run_step "context-diet e2e"       $JS_RUNTIME tests/test-context-diet-e2e.mjs
