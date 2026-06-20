@@ -16,8 +16,9 @@ patches to pi itself.
 
 | Codex primitive (Rust)                                | pi primitive used                                                  |
 | ----------------------------------------------------- | ------------------------------------------------------------------ |
-| Persistent goal in `codex-state` SQLite               | `pi.appendEntry("goal/set" / "goal/status", …)` — branch-aware     |
-| `update_goal` tool the model can call                 | `pi.registerTool({ name: "update_goal", … })`                      |
+| Persistent thread goal in Codex state (`codex-rs/state/src/model/thread_goal.rs`, app-server processor) | `pi.appendEntry("goal/set" / "goal/status", …)` — branch-aware |
+| Goal extension runtime/tool (`codex-rs/ext/goal/src/*`) | `pi.registerTool({ name: "update_goal", … })` + slash command/runtime hooks |
+| Prompt templates (`codex-rs/prompts/templates/goals/*.md` and `codex-rs/ext/goal/templates/goals/*.md`) | Inlined TypeScript prompt builders |
 | Per-turn token accounting                             | `pi.on("turn_end")` reads `event.message.usage.{input,output}`     |
 | Auto-continuation after the agent loop fully settles  | `pi.on("agent_end")` + guarded `setTimeout` + compaction/busy polling + `pi.sendUserMessage(..., { deliverAs: "followUp" })` |
 | Budget-limited steering                               | Once `tokensUsed ≥ tokenBudget`, status flips, wrap-up prompt sent |
@@ -25,8 +26,14 @@ patches to pi itself.
 | Resume across sessions                                | `pi.on("session_start" / "session_tree")` reconstructs from branch entries |
 
 State is reconstructed on every event by walking the current branch. Forking
-the session inherits the parent branch's goal automatically (just like codex's
-thread-id-keyed goals).
+the session inherits the parent branch's goal automatically, analogous to
+Codex's thread-goal state scoped by thread/session identity.
+
+Current Codex statuses are `active`, `paused`, `blocked`, `usageLimited`,
+`budgetLimited`, and `complete`. This pi port currently implements `active`,
+`paused`, `blocked`, `budget_limited`, and `complete`; `usage_limited` is left
+for a follow-up because pi extensions need reliable provider/rate-limit usage
+signals to avoid guessing.
 
 ## Slash command
 
@@ -82,8 +89,22 @@ Re-run `pi` (or `/reload` inside an existing session) to start using `/goal`.
 
 ## Provenance
 
-Prompt templates (continuation / budget-limit / objective-updated) are
-faithfully adapted from `codex-rs/core/templates/goals/*.md` in OpenAI's Codex
-CLI. Behavior mirrors `codex-rs/core/src/goals.rs` and
-`codex-rs/app-server/src/request_processors/thread_goal_processor.rs`, ported
-to pi's extension contract.
+Current Codex source paths inspected for this port/update:
+
+- `codex-rs/ext/goal/src/*` — goal extension runtime, steering, tool, events,
+  accounting, and analytics boundaries.
+- `codex-rs/prompts/templates/goals/*.md` and
+  `codex-rs/ext/goal/templates/goals/*.md` — continuation, budget-limit, and
+  objective-updated prompt templates.
+- `codex-rs/state/src/model/thread_goal.rs` and state migrations — persisted
+  thread-goal model.
+- `codex-rs/app-server/src/request_processors/thread_goal_processor.rs` — app
+  server goal set/get path.
+- `codex-rs/tui/src/app/thread_goal_actions.rs`, `goal_display.rs`, and
+  `goal_files.rs` — TUI workflow, status rendering, and long objective/file
+  materialization.
+
+Intentional divergences: pi has no Codex app-server/state-db boundary inside an
+extension, so this port stores branch-aware custom entries instead of SQL rows;
+pi also lacks Codex's full usage-limit analytics path, so provider
+`usageLimited` parity is not implemented yet.

@@ -8,8 +8,10 @@
  * blocked via the `update_goal` tool, and a hard token budget protects against
  * runaway cost.
  *
- * This is the pi mirror of codex's thread-goal primitive
- * (codex-rs/core/src/goals.rs and codex-rs/core/templates/goals/*.md), assembled
+ * This is the pi mirror of codex's current thread-goal/goal-extension stack
+ * (codex-rs/ext/goal/src/*, codex-rs/prompts/templates/goals/*.md,
+ * codex-rs/state/src/model/thread_goal.rs, and
+ * codex-rs/app-server/src/request_processors/thread_goal_processor.rs), assembled
  * from pi extension primitives — there is no Rust/state-db dependency.
  *
  * Primitives composed:
@@ -114,7 +116,8 @@ const AUTO_CONTINUE_HARD_LIMIT_PER_SESSION = 200;
 const STATUS_KEY = "goal";
 
 /**
- * Continuation prompt — adapted from codex-rs/core/templates/goals/continuation.md.
+ * Continuation prompt — adapted from codex-rs/prompts/templates/goals/continuation.md
+ * and codex-rs/ext/goal/templates/goals/continuation.md.
  * Inlined here because pi extensions cannot read package-private resources.
  * Kept faithful to the original since it's the result of substantial prompt
  * engineering by the codex team.
@@ -161,7 +164,8 @@ Do not call \`update_goal\` unless the goal is complete or the strict blocked au
 };
 
 /**
- * Budget-limit prompt — adapted from codex-rs/core/templates/goals/budget_limit.md.
+ * Budget-limit prompt — adapted from codex-rs/prompts/templates/goals/budget_limit.md
+ * and codex-rs/ext/goal/templates/goals/budget_limit.md.
  * Fired once when tokensUsed crosses tokenBudget, then the goal stops continuing.
  */
 const BUDGET_LIMIT_PROMPT = (g: GoalView): string => {
@@ -185,7 +189,8 @@ Do not call \`update_goal\` unless the goal is actually complete.`;
 };
 
 /**
- * Objective-updated prompt — adapted from codex-rs/core/templates/goals/objective_updated.md.
+ * Objective-updated prompt — adapted from codex-rs/prompts/templates/goals/objective_updated.md
+ * and codex-rs/ext/goal/templates/goals/objective_updated.md.
  * Fired immediately on `/goal <new text>` when there was a prior goal.
  */
 const OBJECTIVE_UPDATED_PROMPT = (g: GoalView): string => {
