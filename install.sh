@@ -172,6 +172,7 @@ link "$HOME/.pi/agent/extensions/background-procs.ts"     "agent/extensions/back
 link "$HOME/.pi/agent/extensions/terminal-title.ts"       "agent/extensions/terminal-title.ts"
 link "$HOME/.pi/agent/extensions/pets.ts"                 "agent/extensions/pets.ts"
 link "$HOME/.pi/agent/extensions/context-tools.ts"        "agent/extensions/context-tools.ts"
+link "$HOME/.pi/agent/extensions/current-time.ts"         "agent/extensions/current-time.ts"
 link "$HOME/.pi/agent/extensions/context-diet.ts"         "agent/extensions/context-diet.ts"
 link "$HOME/.pi/agent/extensions/context-diet.README.md"  "agent/extensions/context-diet.README.md"
 link "$HOME/.pi/agent/extensions/compaction-diet.ts"      "agent/extensions/compaction-diet.ts"
