@@ -291,11 +291,83 @@ function loadExecPolicy(): ExecPolicyRule[] {
  *
  * Codex uses `shlex::try_join` for the reverse; here we go the other way.
  */
-function tokenize(command: string): string[][] {
-	// Split on `;` `&&` `||` `|` so a chained command like `cd foo && rm -rf /`
-	// gets each segment checked.
-	const segments = command.split(/\s*(?:;|\&\&|\|\||\|)\s*/);
-	return segments.map((seg) => tokenizeSegment(seg)).filter((s) => s.length > 0);
+function tokenize(command: string, depth = 0): string[][] {
+	// Split on `;` `&&` `||` `|` only outside quotes so a wrapper like
+	// `bash -lc 'echo ok && rm -rf /'` is first recognized as a shell wrapper,
+	// then recursively inspected via its `-c` payload.
+	const segments = splitShellSegments(command);
+	const out: string[][] = [];
+	for (const seg of segments) {
+		const tokens = tokenizeSegment(seg);
+		if (tokens.length === 0) continue;
+		out.push(tokens);
+		const wrapped = depth < 3 ? shellWrapperPayload(tokens) : undefined;
+		if (wrapped) out.push(...tokenize(wrapped, depth + 1));
+	}
+	return out;
+}
+
+function splitShellSegments(command: string): string[] {
+	const segments: string[] = [];
+	let cur = "";
+	let inSingle = false;
+	let inDouble = false;
+	let i = 0;
+	while (i < command.length) {
+		const ch = command[i];
+		if (inSingle) {
+			cur += ch;
+			if (ch === "'") inSingle = false;
+			i += 1;
+			continue;
+		}
+		if (inDouble) {
+			cur += ch;
+			if (ch === '"') inDouble = false;
+			else if (ch === "\\" && i + 1 < command.length) {
+				cur += command[i + 1];
+				i += 1;
+			}
+			i += 1;
+			continue;
+		}
+		if (ch === "'") {
+			inSingle = true;
+			cur += ch;
+			i += 1;
+			continue;
+		}
+		if (ch === '"') {
+			inDouble = true;
+			cur += ch;
+			i += 1;
+			continue;
+		}
+		const two = command.slice(i, i + 2);
+		if (ch === ";" || ch === "|" || two === "&&" || two === "||") {
+			if (cur.trim()) segments.push(cur.trim());
+			cur = "";
+			i += two === "&&" || two === "||" ? 2 : 1;
+			continue;
+		}
+		cur += ch;
+		i += 1;
+	}
+	if (cur.trim()) segments.push(cur.trim());
+	return segments;
+}
+
+function shellWrapperPayload(tokens: string[]): string | undefined {
+	if (tokens.length < 3) return undefined;
+	const shell = tokens[0].split(/[\\/]/).pop() ?? tokens[0];
+	if (!["bash", "sh", "zsh", "dash", "fish"].includes(shell)) return undefined;
+	for (let i = 1; i < tokens.length - 1; i++) {
+		const tok = tokens[i];
+		if (tok === "-c" || (/^-[A-Za-z]*c[A-Za-z]*$/.test(tok))) {
+			return tokens[i + 1];
+		}
+	}
+	return undefined;
 }
 
 function tokenizeSegment(seg: string): string[] {

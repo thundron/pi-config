@@ -131,6 +131,10 @@ const outsideCases = [
 	["forbid tree /", "tree /", true],
 	["forbid chained && rm -rf /", "echo hi && rm -rf /", true],
 	["forbid chained ; find /", "cd foo; find /", true],
+	["forbid bash -lc wrapped rm", "bash -lc 'rm -rf /'", true],
+	["forbid sh -c wrapped find", "/bin/sh -c 'find /mnt/c/Users'", true],
+	["forbid quoted wrapper chain", "zsh -c 'echo ok && rm -rf /home/x'", true],
+	["allow wrapper around /tmp rm", "bash -lc 'rm -rf /tmp/foo'", false],
 	// sub-agent-only rules are gated OFF outside a sub-agent
 	["allow git push outside subagent", "git push origin main", false],
 	["allow git status", "git status", false],
