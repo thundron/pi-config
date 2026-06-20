@@ -37,6 +37,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 const execAsync = promisify(execCb);
+const MAX_TERMINAL_TITLE_CHARS = 240;
 
 // ─── State persistence ─────────────────────────────────────────────────────
 
@@ -93,6 +94,75 @@ function renderTitle(
 	});
 }
 
+/**
+ * Port of codex-rs/tui/src/terminal_title.rs sanitize_terminal_title().
+ * Treats template output as untrusted display text: remove controls and
+ * invisible/bidi formatting chars, collapse whitespace runs, and bound title
+ * length so tab bars/window managers do not silently truncate arbitrary data.
+ */
+function sanitizeTerminalTitle(title: string): string {
+	let sanitized = "";
+	let charsWritten = 0;
+	let pendingSpace = false;
+
+	for (const ch of title) {
+		// JavaScript treats FEFF as whitespace, but Rust's char::is_whitespace()
+		// does not in Codex's sanitizer path. Exclude invisible formatting chars
+		// from whitespace collapsing so they are dropped, not converted to spaces.
+		if (/\s/u.test(ch) && !isInvisibleFormattingChar(ch)) {
+			// Strip leading whitespace without a separate trim pass.
+			pendingSpace = sanitized.length > 0;
+			continue;
+		}
+
+		if (isDisallowedTerminalTitleChar(ch)) continue;
+
+		if (pendingSpace) {
+			const remaining = Math.max(0, MAX_TERMINAL_TITLE_CHARS - charsWritten);
+			if (remaining > 1) {
+				sanitized += " ";
+				charsWritten += 1;
+				pendingSpace = false;
+			}
+		}
+
+		if (charsWritten >= MAX_TERMINAL_TITLE_CHARS) break;
+
+		sanitized += ch;
+		charsWritten += 1;
+	}
+
+	return sanitized;
+}
+
+function isDisallowedTerminalTitleChar(ch: string): boolean {
+	const cp = ch.codePointAt(0);
+	if (cp === undefined) return true;
+	// JS strings iterate by code point, so this mirrors Rust char::is_control()
+	// for the C0/C1 control ranges relevant to terminal title emission.
+	if ((cp >= 0x00 && cp <= 0x1f) || (cp >= 0x7f && cp <= 0x9f)) return true;
+	return isInvisibleFormattingChar(ch);
+}
+
+function isInvisibleFormattingChar(ch: string): boolean {
+	const cp = ch.codePointAt(0);
+	if (cp === undefined) return true;
+	return (
+		cp === 0x00ad ||
+		cp === 0x034f ||
+		cp === 0x061c ||
+		cp === 0x180e ||
+		(cp >= 0x200b && cp <= 0x200f) ||
+		(cp >= 0x202a && cp <= 0x202e) ||
+		(cp >= 0x2060 && cp <= 0x206f) ||
+		(cp >= 0xfe00 && cp <= 0xfe0f) ||
+		cp === 0xfeff ||
+		(cp >= 0xfff9 && cp <= 0xfffb) ||
+		(cp >= 0x1bca0 && cp <= 0x1bca3) ||
+		(cp >= 0xe0100 && cp <= 0xe01ef)
+	);
+}
+
 function buildValues(pi: ExtensionAPI, ctx: ExtensionContext): Record<string, string | undefined> {
 	const model = ctx.model;
 	let thinking: string | undefined;
@@ -125,7 +195,8 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.setTitle("pi");
 			return;
 		}
-		const rendered = renderTitle(activeTemplate, buildValues(pi, ctx));
+		const rendered = sanitizeTerminalTitle(renderTitle(activeTemplate, buildValues(pi, ctx)));
+		if (rendered.length === 0) return;
 		ctx.ui.setTitle(rendered);
 	};
 
@@ -152,6 +223,13 @@ export default function (pi: ExtensionAPI) {
 	});
 	pi.on("model_select", async (_event, ctx) => apply(ctx));
 	pi.on("thinking_level_select", async (_event, ctx) => apply(ctx));
+
+	(pi as unknown as { __terminalTitleInternals?: unknown }).__terminalTitleInternals = {
+		renderTitle,
+		sanitizeTerminalTitle,
+		isDisallowedTerminalTitleChar,
+		MAX_TERMINAL_TITLE_CHARS,
+	};
 
 	pi.registerCommand("title", {
 		description:
@@ -200,8 +278,13 @@ export default function (pi: ExtensionAPI) {
 			});
 			activeTemplate = args;
 			apply(ctx);
-			const rendered = renderTitle(args, buildValues(pi, ctx));
-			ctx.ui.notify(`Terminal title set. Rendered: ${rendered}`, "info");
+			const rendered = sanitizeTerminalTitle(renderTitle(args, buildValues(pi, ctx)));
+			ctx.ui.notify(
+				rendered.length > 0
+					? `Terminal title set. Rendered: ${rendered}`
+					: "Terminal title set, but it has no visible content after sanitization; current title left unchanged.",
+				"info",
+			);
 		},
 
 		getArgumentCompletions: (prefix: string) => {
