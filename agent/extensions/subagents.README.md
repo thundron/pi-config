@@ -88,10 +88,20 @@ parent agent. Codex naming preserved where possible.
 ```text
 /subagents                         show status of all sub-agents in this session
 /subagents ls                      list (alias for the above)
+/subagents mode                    show Codex MultiAgentV2 mode
+/subagents mode explicit           only spawn when the user explicitly asks
+/subagents mode proactive          allow proactive delegation when useful
 /subagents abort [id|all]          SIGTERM matching sub-agents (prefix-match like pi-fleet)
 /subagents fire <manifest.json>    dispatch from a legacy pi-fleet manifest
 /subagents cap <N>                 set concurrency cap (1..64)
 ```
+
+The mode is persisted as a hidden branch entry (`subagents/mode`) and injected
+before model calls with Codex's `<multi_agent_mode>...</multi_agent_mode>`
+marker. The default is `explicit-request-only`, matching Codex's safe default:
+sub-agents should not be spawned unless the user explicitly asks for delegation
+or parallel agent work. `proactive` mode overrides that and lets the model spawn
+sub-agents when doing so materially improves speed, coverage, or quality.
 
 `/subagents fire` reads the existing pi-fleet manifest format and
 dispatches each agent via `subagent_spawn`, so the existing
@@ -174,7 +184,9 @@ those.
 
 Tool API + concurrency-cap constants adapted from
 `codex-rs/core/src/tools/handlers/multi_agents/` and
-`codex-rs/core/src/tools/handlers/agent_jobs.rs`. Topology storage
-patterned after `codex-rs/agent-graph-store/`. Subprocess +
-JSONL-stream implementation is original (codex's agents are in-process
-within one Rust binary, which is not yet possible from a pi extension).
+`codex-rs/core/src/tools/handlers/agent_jobs.rs`. MultiAgentV2 mode text is
+adapted from `codex-rs/core/src/context/multi_agent_mode_instructions.rs` and
+`codex-rs/protocol/src/config_types.rs`. Topology storage patterned after
+`codex-rs/agent-graph-store/`. Subprocess + JSONL-stream implementation is
+original (codex's agents are in-process within one Rust binary, which is not yet
+possible from a pi extension).

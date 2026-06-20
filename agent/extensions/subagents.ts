@@ -87,6 +87,58 @@ type AgentStatus =
 	| "aborted"
 	| "error";
 
+type MultiAgentMode = "explicitRequestOnly" | "proactive";
+
+interface MultiAgentModeEntry {
+	mode: MultiAgentMode;
+	t: number;
+}
+
+const EXPLICIT_REQUEST_ONLY_MULTI_AGENT_MODE_TEXT =
+	"Do not spawn sub-agents unless the user explicitly asks for sub-agents, delegation, or parallel agent work.";
+const PROACTIVE_MULTI_AGENT_MODE_TEXT =
+	"Proactive multi-agent delegation is active. Any earlier instruction requiring an explicit user request before spawning sub-agents is overridden. Spawn sub-agents when parallel delegation would materially improve speed, coverage, or quality.";
+
+function multiAgentModeText(mode: MultiAgentMode): string {
+	return mode === "proactive"
+		? PROACTIVE_MULTI_AGENT_MODE_TEXT
+		: EXPLICIT_REQUEST_ONLY_MULTI_AGENT_MODE_TEXT;
+}
+
+function renderMultiAgentModeContext(mode: MultiAgentMode): string {
+	return `<multi_agent_mode>\n${multiAgentModeText(mode)}\n</multi_agent_mode>`;
+}
+
+function parseMultiAgentMode(raw: string): MultiAgentMode | undefined {
+	const v = raw.trim().toLowerCase().replace(/[\s_-]+/g, "");
+	if (v === "proactive" || v === "auto" || v === "automatic") return "proactive";
+	if (
+		v === "explicit" ||
+		v === "explicitrequestonly" ||
+		v === "explicitonly" ||
+		v === "manual" ||
+		v === "off"
+	) return "explicitRequestOnly";
+	return undefined;
+}
+
+function modeLabel(mode: MultiAgentMode): string {
+	return mode === "proactive" ? "proactive" : "explicit-request-only";
+}
+
+function findMultiAgentMode(ctx: ExtensionContext): MultiAgentMode {
+	let mode: MultiAgentMode = "explicitRequestOnly";
+	for (const entry of ctx.sessionManager.getBranch()) {
+		if (entry.type !== "custom_message") continue;
+		if (entry.customType !== "subagents/mode") continue;
+		const details = entry.details as Partial<MultiAgentModeEntry>;
+		if (details.mode === "proactive" || details.mode === "explicitRequestOnly") {
+			mode = details.mode;
+		}
+	}
+	return mode;
+}
+
 /** Codex's `multi_agents/spawn` arg shape, adapted for pi subprocesses. */
 interface SpawnArgs {
 	instruction: string;
@@ -369,6 +421,11 @@ export default function (pi: ExtensionAPI) {
 	const live = new Map<string, LiveAgent>();
 	const semaphore = new Semaphore(DEFAULT_MAX_CONCURRENCY);
 	let currentCap = DEFAULT_MAX_CONCURRENCY;
+	let multiAgentMode: MultiAgentMode = "explicitRequestOnly";
+
+	const recomputeMode = (ctx: ExtensionContext): void => {
+		multiAgentMode = findMultiAgentMode(ctx);
+	};
 
 	// ─── Footer ────────────────────────────────────────────────────────────
 
@@ -869,12 +926,24 @@ export default function (pi: ExtensionAPI) {
 
 	// ─── Slash command: /fleet ─────────────────────────────────────────────
 
+	pi.on("context", async (event, _ctx) => {
+		const modeMessage = {
+			role: "user" as const,
+			content: [{ type: "text" as const, text: renderMultiAgentModeContext(multiAgentMode) }],
+			timestamp: Date.now(),
+		};
+		return { messages: [modeMessage, ...event.messages] };
+	});
+
 	pi.registerCommand("subagents", {
-		description: "Manage parallel sub-agents (codex /subagents port). /subagents, /subagents ls, /subagents abort [id|all], /subagents fire <manifest.json>",
+		description: "Manage parallel sub-agents (codex /subagents port). /subagents, /subagents ls, /subagents mode [explicit|proactive], /subagents abort [id|all], /subagents fire <manifest.json>",
 		handler: async (rawArgs: string, ctx: ExtensionCommandContext) => {
 			const args = rawArgs.trim();
 			if (!args || args === "ls" || args === "status") {
 				const lines: string[] = [];
+				lines.push(`mode: ${modeLabel(multiAgentMode)}`);
+				lines.push(`hint: ${multiAgentModeText(multiAgentMode)}`);
+				lines.push("");
 				if (runId) {
 					lines.push(`run: ${runId}`);
 					lines.push(`dir: ${runDir(runId)}`);
@@ -900,6 +969,33 @@ export default function (pi: ExtensionAPI) {
 
 			const [sub, ...rest] = args.split(/\s+/);
 			const tail = rest.join(" ").trim();
+
+			if (sub === "mode") {
+				if (!tail) {
+					ctx.ui.notify(
+						`subagents mode: ${modeLabel(multiAgentMode)}\n\n${multiAgentModeText(multiAgentMode)}\n\nSet with: /subagents mode explicit | proactive`,
+						"info",
+					);
+					return;
+				}
+				const next = parseMultiAgentMode(tail);
+				if (!next) {
+					ctx.ui.notify(
+						"Usage: /subagents mode explicit | proactive\nAliases: explicit, manual, off, proactive, auto",
+						"warning",
+					);
+					return;
+				}
+				pi.sendMessage<MultiAgentModeEntry>({
+					customType: "subagents/mode",
+					content: `subagents mode ${modeLabel(next)}`,
+					display: false,
+					details: { mode: next, t: Date.now() },
+				});
+				multiAgentMode = next;
+				ctx.ui.notify(`Subagents mode set to ${modeLabel(next)}.`, "info");
+				return;
+			}
 
 			if (sub === "abort" || sub === "kill") {
 				const target = tail || "all";
@@ -968,7 +1064,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			ctx.ui.notify(
-				`Unknown subcommand: ${sub}\n\nUsage:\n  /subagents               show status\n  /subagents ls            list sub-agents\n  /subagents abort [id|all]\n  /subagents fire <manifest.json>\n  /subagents cap <N>       set concurrency`,
+				`Unknown subcommand: ${sub}\n\nUsage:\n  /subagents               show status\n  /subagents ls            list sub-agents\n  /subagents mode [explicit|proactive]\n  /subagents abort [id|all]\n  /subagents fire <manifest.json>\n  /subagents cap <N>       set concurrency`,
 				"warning",
 			);
 		},
@@ -976,6 +1072,7 @@ export default function (pi: ExtensionAPI) {
 		getArgumentCompletions: (prefix: string) => {
 			const subs = [
 				{ value: "ls", description: "list sub-agents" },
+				{ value: "mode", description: "show/set Codex multi-agent mode" },
 				{ value: "abort", description: "SIGTERM sub-agent(s)" },
 				{ value: "fire", description: "dispatch from a manifest.json" },
 				{ value: "cap", description: "set concurrency cap" },
@@ -1065,6 +1162,12 @@ export default function (pi: ExtensionAPI) {
 		// Don't auto-resume children from previous sessions — their parent died,
 		// and re-attaching to orphaned pi processes is fragile. We DO still see
 		// their on-disk state via the legacy `pi-fleet status` CLI.
+		recomputeMode(ctx);
+		refreshFooter(ctx);
+	});
+
+	pi.on("session_tree", async (_event, ctx) => {
+		recomputeMode(ctx);
 		refreshFooter(ctx);
 	});
 
