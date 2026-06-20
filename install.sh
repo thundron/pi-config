@@ -181,6 +181,8 @@ link "$HOME/.pi/agent/extensions/tool-pairing-guard.README.md" "agent/extensions
 link "$HOME/.pi/agent/skills/claude-code/SKILL.md"        "agent/skills/claude-code/SKILL.md"
 link "$HOME/.pi/agent/skills/subagents/SKILL.md"         "agent/skills/subagents/SKILL.md"
 link "$HOME/.pi/agent/roles/awaiter.json"                 "agent/roles/awaiter.json"
+link "$HOME/.pi/agent/roles/explorer.json"                "agent/roles/explorer.json"
+link "$HOME/.pi/agent/roles/worker.json"                  "agent/roles/worker.json"
 link "$HOME/.pi/agent/execpolicy.example.json"            "agent/execpolicy.example.json"
 
 printf '\n[copies — pi rewrites these]\n'
