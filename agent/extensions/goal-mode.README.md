@@ -50,15 +50,21 @@ signals to avoid guessing.
 /goal clear                 — clear the goal entirely
 ```
 
-## Model tool
+## Model tools
 
-The extension registers a tool named `update_goal` that the LLM can call:
+The extension registers two model-callable tools:
 
 ```ts
+get_goal({})
 update_goal({ status: "complete" | "blocked", summary?: string })
 ```
 
-The model is instructed (via the continuation prompt) to call this only when:
+`get_goal` is read-only and returns the reconstructed branch-local goal view
+(or `null` when no goal is active). `update_goal` mutates status and is
+intentionally narrower than Codex's full app-server goal API.
+
+The model is instructed (via the continuation prompt) to call `update_goal` only
+when:
 
 - **complete** — current evidence proves every requirement is satisfied
 - **blocked** — the same blocker has repeated for ≥ 3 consecutive goal turns

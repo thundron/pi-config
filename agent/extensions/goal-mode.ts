@@ -394,6 +394,8 @@ function renderGoalDump(goal: GoalView | undefined): string {
 
 // ─── Tool schema ────────────────────────────────────────────────────────────
 
+const GetGoalParams = Type.Object({}, { additionalProperties: false });
+
 const UpdateGoalParams = Type.Object({
 	status: StringEnum(["complete", "blocked"] as const, {
 		description:
@@ -679,7 +681,30 @@ export default function (pi: ExtensionAPI) {
 		compactionWatchdogTimer = undefined;
 	}
 
-	// ─── Model-callable tool: update_goal ────────────────────────────────────
+	// ─── Model-callable tools: get_goal / update_goal ─────────────────────────
+
+	pi.registerTool({
+		name: "get_goal",
+		label: "get goal",
+		description:
+			"Inspect the current pi /goal state for this branch without mutating it. Returns null when no goal is active.",
+		parameters: GetGoalParams,
+
+		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+			const live = reconstructGoal(ctx);
+			goal = live;
+			refresh(ctx);
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: live ? renderGoalDump(live) : "No active goal on this branch.",
+					},
+				],
+				details: { goal: live ?? null },
+			};
+		},
+	});
 
 	pi.registerTool({
 		name: "update_goal",
