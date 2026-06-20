@@ -43,6 +43,7 @@ case "$mode" in
     run_step "context-tools"          $JS_RUNTIME tests/test-context-tools.mjs
     run_step "subagents mode"         $JS_RUNTIME tests/test-subagents-mode.mjs
     run_step "agent roles"            $JS_RUNTIME tests/test-agent-roles.mjs
+    run_step "memories tools"         $JS_RUNTIME tests/test-memories-tools.mjs
     run_step "context-diet unit"      $JS_RUNTIME tests/test-context-diet.mjs
     run_step "compaction-diet unit"   $JS_RUNTIME tests/test-compaction-diet.mjs
     run_step "context-diet e2e"       $JS_RUNTIME tests/test-context-diet-e2e.mjs
@@ -65,6 +66,7 @@ case "$mode" in
     run_step "context-tools"          $JS_RUNTIME tests/test-context-tools.mjs
     run_step "subagents mode"         $JS_RUNTIME tests/test-subagents-mode.mjs
     run_step "agent roles"            $JS_RUNTIME tests/test-agent-roles.mjs
+    run_step "memories tools"         $JS_RUNTIME tests/test-memories-tools.mjs
     run_step "context-diet unit"      $JS_RUNTIME tests/test-context-diet.mjs
     run_step "compaction-diet unit"   $JS_RUNTIME tests/test-compaction-diet.mjs
     run_step "context-diet e2e"       $JS_RUNTIME tests/test-context-diet-e2e.mjs

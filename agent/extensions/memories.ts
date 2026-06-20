@@ -3,7 +3,8 @@
  *
  * What's ported (v0):
  *   - Persistent registry file at `~/.pi/memories/MEMORY.md`
- *   - Two model-callable tools: `memory_recall` (search) + `memory_save` (append)
+ *   - Model-callable tools: `memory_list`, `memory_read`, `memory_search`,
+ *     `memory_recall` (section search) + `memory_save` (append)
  *   - Slash commands: `/memories`, `/memories add <text>`, `/memories clear`,
  *     `/memories where` (print the path)
  *   - Context injection: small developer-style message that points the model
@@ -56,9 +57,12 @@ const MEMORY_FILE = join(MEMORIES_ROOT, "MEMORY.md");
  * via the tools, without dumping the full file into context.
  *
  * Codex's equivalent is much longer (full layout + retrieval procedure +
- * citation contract). v0 collapses to the essentials.
+ * citation contract). This single-file pi port keeps the essentials while
+ * exposing list/read/search tools inspired by codex-rs/ext/memories/src/tools/.
  *
- * codex source: codex-rs/memories/read/templates/memories/read_path.md
+ * codex sources:
+ *   - codex-rs/memories/read/templates/memories/read_path.md
+ *   - codex-rs/ext/memories/src/tools/{list,read,search,ad_hoc_note}.rs
  */
 const CONTEXT_HINT = `## Memory
 
@@ -74,8 +78,10 @@ Hard skip cases (don't use memory): current time/date, simple translation,
 one-line shell command, trivial formatting.
 
 How to retrieve:
-- Call \`memory_recall({ query })\` to search MEMORY.md for keywords.
-- The tool returns matching sections only; the full file is not loaded.
+- Call \`memory_recall({ query })\` to search MEMORY.md by category section.
+- Call \`memory_search({ queries })\` for line-level matches with context.
+- Call \`memory_list({})\` to inspect available sections/categories.
+- Call \`memory_read({ line_offset, max_lines })\` to read bounded line ranges.
 
 How to record:
 - Call \`memory_save({ category, text })\` to add a durable fact, preference, or
@@ -184,7 +190,123 @@ function recallMemory(query: string): { found: boolean; text: string } {
 	return { found: true, text: matches.join("\n\n---\n\n") };
 }
 
+interface MemorySectionInfo {
+	category: string;
+	line_start: number;
+	line_end: number;
+	entries: number;
+}
+
+function listMemorySections(): { path: string; sections: MemorySectionInfo[] } {
+	const content = readMemoryFile();
+	const lines = content.split(/\r?\n/);
+	const sections: MemorySectionInfo[] = [];
+	let current: MemorySectionInfo | undefined;
+	for (let i = 0; i < lines.length; i++) {
+		const m = lines[i].match(/^##\s+(.+?)\s*$/);
+		if (m) {
+			if (current) current.line_end = i;
+			current = { category: m[1], line_start: i + 1, line_end: lines.length, entries: 0 };
+			sections.push(current);
+			continue;
+		}
+		if (current && /^-\s+/.test(lines[i])) current.entries += 1;
+	}
+	return { path: MEMORY_FILE, sections };
+}
+
+function readMemoryLines(lineOffset = 1, maxLines = 200): {
+	path: string;
+	line_offset: number;
+	max_lines: number;
+	lines: string[];
+	truncated: boolean;
+} {
+	const content = readMemoryFile();
+	const lines = content ? content.split(/\r?\n/) : [];
+	const start = Math.max(1, Math.floor(lineOffset || 1));
+	const limit = Math.min(1000, Math.max(1, Math.floor(maxLines || 200)));
+	const slice = lines.slice(start - 1, start - 1 + limit);
+	return {
+		path: MEMORY_FILE,
+		line_offset: start,
+		max_lines: limit,
+		lines: slice.map((line, idx) => `${start + idx}: ${line}`),
+		truncated: start - 1 + limit < lines.length,
+	};
+}
+
+function searchMemoryLines(opts: {
+	queries: string[];
+	context_lines?: number;
+	max_results?: number;
+	case_sensitive?: boolean;
+}): {
+	path: string;
+	queries: string[];
+	matches: Array<{ line: number; text: string; context: string[] }>;
+	truncated: boolean;
+} {
+	const content = readMemoryFile();
+	const lines = content ? content.split(/\r?\n/) : [];
+	const queries = opts.queries.map((q) => q.trim()).filter(Boolean);
+	const contextLines = Math.min(10, Math.max(0, Math.floor(opts.context_lines ?? 2)));
+	const maxResults = Math.min(100, Math.max(1, Math.floor(opts.max_results ?? 20)));
+	const needle = opts.case_sensitive ? queries : queries.map((q) => q.toLowerCase());
+	const matches: Array<{ line: number; text: string; context: string[] }> = [];
+	for (let i = 0; i < lines.length; i++) {
+		const hay = opts.case_sensitive ? lines[i] : lines[i].toLowerCase();
+		if (!needle.some((q) => hay.includes(q))) continue;
+		const from = Math.max(0, i - contextLines);
+		const to = Math.min(lines.length, i + contextLines + 1);
+		matches.push({
+			line: i + 1,
+			text: lines[i],
+			context: lines.slice(from, to).map((line, idx) => `${from + idx + 1}: ${line}`),
+		});
+		if (matches.length >= maxResults) break;
+	}
+	return {
+		path: MEMORY_FILE,
+		queries,
+		matches,
+		truncated: matches.length >= maxResults && lines.some((line, idx) => {
+			if (idx <= matches[matches.length - 1].line - 1) return false;
+			const hay = opts.case_sensitive ? line : line.toLowerCase();
+			return needle.some((q) => hay.includes(q));
+		}),
+	};
+}
+
 // ─── Tool schemas ───────────────────────────────────────────────────────────
+
+const MemoryListParams = Type.Object({}, { additionalProperties: false });
+
+const MemoryReadParams = Type.Object({
+	line_offset: Type.Optional(
+		Type.Number({
+			description: "1-indexed line number to start reading from. Defaults to 1.",
+		}),
+	),
+	max_lines: Type.Optional(
+		Type.Number({
+			description: "Maximum number of lines to return. Defaults to 200, capped at 1000.",
+		}),
+	),
+});
+
+const MemorySearchParams = Type.Object({
+	queries: Type.Array(Type.String(), {
+		description: "One or more case-insensitive substrings to search for across MEMORY.md lines.",
+	}),
+	context_lines: Type.Optional(
+		Type.Number({ description: "Number of surrounding context lines per match. Defaults to 2, capped at 10." }),
+	),
+	max_results: Type.Optional(
+		Type.Number({ description: "Maximum matches to return. Defaults to 20, capped at 100." }),
+	),
+	case_sensitive: Type.Optional(Type.Boolean({ description: "Whether matching is case-sensitive. Defaults to false." })),
+});
 
 const MemoryRecallParams = Type.Object({
 	query: Type.String({
@@ -213,6 +335,55 @@ export default function (pi: ExtensionAPI) {
 	void PI_HOME; // tracked for future skill-folder integration
 
 	// ─── Tools the model can call ──────────────────────────────────────────
+
+	pi.registerTool({
+		name: "memory_list",
+		label: "list memories",
+		description: "List available sections/categories in the persistent MEMORY.md registry.",
+		parameters: MemoryListParams,
+		async execute() {
+			const result = listMemorySections();
+			const lines = result.sections.length > 0
+				? result.sections.map((s) => `- ${s.category} (lines ${s.line_start}-${s.line_end}, ${s.entries} entr${s.entries === 1 ? "y" : "ies"})`)
+				: [`No memory sections found in ${MEMORY_FILE}.`];
+			return {
+				content: [{ type: "text" as const, text: lines.join("\n") }],
+				details: result,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "memory_read",
+		label: "read memories",
+		description: "Read a bounded line range from MEMORY.md with line numbers.",
+		parameters: MemoryReadParams,
+		async execute(_id, params) {
+			const p = params as { line_offset?: number; max_lines?: number };
+			const result = readMemoryLines(p.line_offset, p.max_lines);
+			return {
+				content: [{ type: "text" as const, text: result.lines.join("\n") || `${MEMORY_FILE} is empty or missing.` }],
+				details: result,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "memory_search",
+		label: "search memories",
+		description: "Search MEMORY.md line-by-line for one or more queries and return bounded context snippets.",
+		parameters: MemorySearchParams,
+		async execute(_id, params) {
+			const result = searchMemoryLines(params as { queries: string[]; context_lines?: number; max_results?: number; case_sensitive?: boolean });
+			const text = result.matches.length > 0
+				? result.matches.map((m) => m.context.join("\n")).join("\n\n---\n\n")
+				: `No memory lines matched ${result.queries.map((q) => JSON.stringify(q)).join(", ") || "the provided queries"}.`;
+			return {
+				content: [{ type: "text" as const, text }],
+				details: result,
+			};
+		},
+	});
 
 	pi.registerTool({
 		name: "memory_recall",
