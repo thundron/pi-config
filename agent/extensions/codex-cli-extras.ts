@@ -20,12 +20,45 @@
 
 import { exec as execCb } from "node:child_process";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 const execAsync = promisify(execCb);
 const DIFF_TIMEOUT_MS = 30_000;
+
+function buildRolloutTraceSnapshot(ctx: ExtensionCommandContext): string {
+	const rollout = ctx.sessionManager.getSessionFile();
+	const sessionId = ctx.sessionManager.getSessionId?.();
+	const sessionName = ctx.sessionManager.getSessionName?.();
+	const fleetRoot = join(homedir(), ".pi", "fleet", "runs");
+	const memoryFile = join(process.env.PI_MEMORIES_DIR ?? join(homedir(), ".pi", "memories"), "MEMORY.md");
+	const rolloutBudgetFile = process.env.PI_ROLLOUT_BUDGET_FILE;
+	const lines: string[] = [];
+	lines.push("Rollout trace snapshot (local only)");
+	lines.push("Privacy: these paths can contain prompts, model responses, tool inputs/outputs, terminal output, and local paths. Do not upload blindly.");
+	lines.push("");
+	lines.push("Core session:");
+	lines.push(`  • session id       ${sessionId ?? "(unknown)"}`);
+	lines.push(`  • session name     ${sessionName ?? "(unknown)"}`);
+	lines.push(`  • cwd              ${ctx.cwd}`);
+	lines.push(`  • rollout JSONL    ${rollout ?? "(ephemeral — no persisted JSONL)"}`);
+	lines.push("");
+	lines.push("Local diagnostic artifacts:");
+	lines.push(`  • subagent runs    ${fleetRoot}${existsSync(fleetRoot) ? "" : " (missing)"}`);
+	lines.push(`  • memory registry  ${memoryFile}${existsSync(memoryFile) ? "" : " (missing)"}`);
+	if (rolloutBudgetFile) lines.push(`  • budget ledger    ${rolloutBudgetFile}${existsSync(rolloutBudgetFile) ? "" : " (missing)"}`);
+	else lines.push("  • budget ledger    (not configured)");
+	lines.push("");
+	lines.push("Related pi diagnostics:");
+	lines.push("  • /debug-config    effective settings and extension state");
+	lines.push("  • /hooks           extension lifecycle activity");
+	lines.push("  • /tools           active tool list");
+	lines.push("  • /subagents       live sub-agent state");
+	lines.push("  • /context-diet    live context trimming stats");
+	return lines.join("\n");
+}
 
 // ─── /diff ──────────────────────────────────────────────────────────────────
 
@@ -404,12 +437,17 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	/**
-	 * /rollout — print the session JSONL rollout path. One-liner port of
-	 * codex's `/rollout` (codex-rs/tui/src/chatwidget/slash_dispatch.rs SlashCommand::Rollout).
+	 * /rollout — print the session JSONL rollout path. `/rollout trace` adds a
+	 * local-only diagnostic path inventory inspired by codex-rs/rollout-trace.
 	 */
 	pi.registerCommand("rollout", {
-		description: "Print the current session's JSONL file path (codex port).",
-		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+		description: "Print the current session JSONL path, or /rollout trace for local diagnostics.",
+		handler: async (rawArgs: string, ctx: ExtensionCommandContext) => {
+			const args = rawArgs.trim().toLowerCase();
+			if (args === "trace" || args === "bundle" || args === "debug") {
+				ctx.ui.notify(buildRolloutTraceSnapshot(ctx), "info");
+				return;
+			}
 			const file = ctx.sessionManager.getSessionFile();
 			if (!file) {
 				ctx.ui.notify(
@@ -419,6 +457,15 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			ctx.ui.notify(`Rollout: ${file}`, "info");
+		},
+		getArgumentCompletions: (prefix: string) => {
+			if (prefix.includes(" ")) return null;
+			const opts = [
+				{ value: "trace", description: "show local diagnostic artifact paths" },
+				{ value: "bundle", description: "alias for trace" },
+			];
+			const p = prefix.trim().toLowerCase();
+			return opts.filter((o) => o.value.startsWith(p)).map((o) => ({ value: o.value, label: o.value, description: o.description }));
 		},
 	});
 
@@ -460,6 +507,10 @@ export default function (pi: ExtensionAPI) {
 	 *
 	 * codex source: codex-rs/tui/src/chatwidget/slash_dispatch.rs (SlashCommand::TestApproval)
 	 */
+	(pi as unknown as { __codexCliExtrasInternals?: unknown }).__codexCliExtrasInternals = {
+		buildRolloutTraceSnapshot,
+	};
+
 	pi.registerCommand("test-approval", {
 		description: "Test pi's confirm + select dialog APIs (codex port of /test-approval).",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
