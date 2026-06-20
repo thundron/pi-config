@@ -64,6 +64,15 @@ parent agent. Codex naming preserved where possible.
 | `provider` | string | Override parent's provider. |
 | `extra_args` | string[] | Raw pi CLI flags. Use sparingly. |
 
+Compatibility aliases accepted before validation (Codex MultiAgentV2-ish callers):
+
+| Alias | Canonical pi field |
+| --- | --- |
+| `message` | `instruction` |
+| `task_name` | `id` |
+| `agent_type` | `role` |
+| `reasoning_effort` | `thinking` |
+
 ### `subagent_wait` parameters
 
 | Field | Type | Purpose |

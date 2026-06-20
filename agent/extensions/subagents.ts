@@ -139,6 +139,23 @@ function findMultiAgentMode(ctx: ExtensionContext): MultiAgentMode {
 	return mode;
 }
 
+function normalizeSpawnArgs(raw: unknown): Record<string, unknown> {
+	const input = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+	const out: Record<string, unknown> = { ...input };
+	if (out.instruction === undefined && typeof input.message === "string") out.instruction = input.message;
+	if (out.id === undefined && typeof input.task_name === "string") out.id = input.task_name;
+	if (out.role === undefined && typeof input.agent_type === "string") out.role = input.agent_type;
+	if (out.thinking === undefined && typeof input.reasoning_effort === "string") {
+		out.thinking = input.reasoning_effort;
+	}
+	// Drop Codex-only aliases so the canonical TypeBox schema validates cleanly.
+	delete out.message;
+	delete out.task_name;
+	delete out.agent_type;
+	delete out.reasoning_effort;
+	return out;
+}
+
 /** Codex's `multi_agents/spawn` arg shape, adapted for pi subprocesses. */
 interface SpawnArgs {
 	instruction: string;
@@ -744,6 +761,7 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Spawn a sub-agent pi process to work on a parallel task. Returns immediately with the sub-agent id and current status. Use subagent_wait to block until it finishes. Optionally creates a git worktree per sub-agent.",
 		parameters: SpawnParams,
+		prepareArguments: (args: unknown) => normalizeSpawnArgs(args) as never,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			try {
 				const rec = await spawnAgent(ctx, params as SpawnArgs);

@@ -44,13 +44,14 @@ if (typeof mod.default !== "function") {
 const commands = new Map();
 const handlers = new Map();
 const messages = [];
+const tools = [];
 const mockPi = {
 	on: (event, handler) => {
 		if (!handlers.has(event)) handlers.set(event, []);
 		handlers.get(event).push(handler);
 	},
 	registerCommand: (name, command) => commands.set(name, command),
-	registerTool: () => {},
+	registerTool: (tool) => tools.push(tool),
 	sendMessage: (message) => messages.push(message),
 	sendUserMessage: () => {},
 };
@@ -87,6 +88,7 @@ async function contextText(ctx, messagesIn = []) {
 console.log("=== registration ===");
 ok("registers /subagents", commands.has("subagents"));
 ok("registers context hook", (handlers.get("context") ?? []).length > 0);
+ok("registers subagent_spawn", tools.some((t) => t.name === "subagent_spawn"));
 
 console.log("\n=== default explicit mode ===");
 {
@@ -121,6 +123,23 @@ console.log("\n=== invalid mode help ===");
 	const ctx = ctxFor([]);
 	await commands.get("subagents").handler("mode banana", ctx);
 	ok("invalid mode warns", ctx.notifications.some((n) => n.type === "warning" && n.message.includes("Usage: /subagents mode")), JSON.stringify(ctx.notifications));
+}
+
+console.log("\n=== spawn alias normalization ===");
+{
+	const spawn = tools.find((t) => t.name === "subagent_spawn");
+	const normalized = spawn.prepareArguments({
+		message: "investigate the parser",
+		task_name: "parser-agent",
+		agent_type: "explorer",
+		reasoning_effort: "high",
+		provider: "anthropic",
+	});
+	ok("message maps to instruction", normalized.instruction === "investigate the parser", JSON.stringify(normalized));
+	ok("task_name maps to id", normalized.id === "parser-agent", JSON.stringify(normalized));
+	ok("agent_type maps to role", normalized.role === "explorer", JSON.stringify(normalized));
+	ok("reasoning_effort maps to thinking", normalized.thinking === "high", JSON.stringify(normalized));
+	ok("aliases removed before validation", !("message" in normalized) && !("task_name" in normalized) && !("agent_type" in normalized) && !("reasoning_effort" in normalized), JSON.stringify(normalized));
 }
 
 console.log(`\n=== summary: ${pass} passed, ${fail} failed ===`);
