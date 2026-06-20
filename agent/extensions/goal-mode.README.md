@@ -79,6 +79,9 @@ when:
   pending auto-continuation cancels it so we never stomp on a typing user.
 - **Branch-switch invalidation** — `session_tree` events bump the generation
   counter, so an in-flight continuation timer for the old branch is dropped.
+- **Plan-mode suppression** — while `plan-mode.ts` has an active `plan/on`
+  marker, goal auto-continuation is suppressed until `/execute` records
+  `plan/off`, preventing planning and execution loops from fighting.
 - **Post-run compaction guard** — `session_before_compact` pauses pending
   continuations until shortly after `session_compact`, avoiding races with Pi
   core's post-agent `continue()` path.

@@ -43,11 +43,16 @@ if (typeof mod.default !== "function") {
 
 const tools = [];
 const appended = [];
+const handlers = new Map();
+const sentUserMessages = [];
 const mockPi = {
-	on: () => {},
+	on: (event, handler) => {
+		if (!handlers.has(event)) handlers.set(event, []);
+		handlers.get(event).push(handler);
+	},
 	registerCommand: () => {},
 	registerTool: (tool) => tools.push(tool),
-	sendUserMessage: () => {},
+	sendUserMessage: (message) => sentUserMessages.push(message),
 	sendMessage: () => {},
 	appendEntry: (customType, data) => appended.push({ customType, data }),
 };
@@ -96,6 +101,28 @@ console.log("\n=== update_goal still appends status ===");
 	const r = await updateGoal.execute("id", { status: "complete", summary: "done" }, new AbortController().signal, () => {}, ctxFor(branch));
 	ok("update succeeds", r.details?.ok === true, JSON.stringify(r.details));
 	ok("status append recorded", appended.some((e) => e.customType === "goal/status" && e.data.status === "complete" && e.data.summary === "done"), JSON.stringify(appended));
+}
+
+console.log("\n=== plan mode suppresses auto-continuation ===");
+{
+	const notifications = [];
+	const branch = [
+		{ type: "custom", customType: "goal/set", data: { objective: "keep going", t: 1 } },
+		{ type: "custom_message", customType: "plan/on", details: { previousTools: ["read"], t: 2 } },
+	];
+	const ctx = {
+		hasUI: true,
+		sessionManager: { getBranch: () => branch },
+		ui: { setStatus: () => {}, notify: (message, type) => notifications.push({ message, type }) },
+		isIdle: () => true,
+		hasPendingMessages: () => false,
+	};
+	const before = sentUserMessages.length;
+	for (const h of handlers.get("agent_end") ?? []) {
+		await h({ messages: [{ role: "assistant", stopReason: "stop" }] }, ctx);
+	}
+	ok("no follow-up queued", sentUserMessages.length === before, `before=${before} after=${sentUserMessages.length}`);
+	ok("notifies about plan-mode suppression", notifications.some((n) => n.message.includes("plan mode") && n.type === "info"), JSON.stringify(notifications));
 }
 
 console.log(`\n=== summary: ${pass} passed, ${fail} failed ===`);

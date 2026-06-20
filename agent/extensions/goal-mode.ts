@@ -78,6 +78,11 @@ interface GoalStatusEntry {
 	summary?: string;
 }
 
+interface PlanOnEntry {
+	previousTools?: string[];
+	t: number;
+}
+
 /** Reconstructed view of the active goal for this branch. */
 interface GoalView {
 	objective: string;
@@ -264,6 +269,17 @@ function assistantTurnTokens(msg: { usage?: { input?: number; output?: number } 
  *   - A pre-existing budget_limited state stays sticky; we don't auto-flip
  *     back to active just because the budget changed.
  */
+function isPlanModeActive(ctx: ExtensionContext): boolean {
+	const branch = ctx.sessionManager.getBranch();
+	let on: PlanOnEntry | undefined;
+	for (const entry of branch) {
+		if (entry.type !== "custom_message") continue;
+		if (entry.customType === "plan/on") on = entry.details as PlanOnEntry;
+		else if (entry.customType === "plan/off") on = undefined;
+	}
+	return on !== undefined;
+}
+
 function reconstructGoal(ctx: ExtensionContext): GoalView | undefined {
 	const branch = ctx.sessionManager.getBranch();
 	let setEntry: { data: GoalSetEntry; index: number } | undefined;
@@ -435,6 +451,8 @@ export default function (pi: ExtensionAPI) {
 	 * LLM doesn't burn the budget retrying. */
 	let consecutiveErrorEnds = 0;
 	const CONSECUTIVE_ERROR_PAUSE_THRESHOLD = 2;
+	/** Avoid spamming the same plan-mode suppression notice after every turn. */
+	let planModeSuppressionNotified = false;
 
 	/**
 	 * Pi's core may run auto-compaction after `agent_end` while the original
@@ -568,6 +586,18 @@ export default function (pi: ExtensionAPI) {
 		}
 
 		if (!ctx.hasUI) return; // Print/RPC mode: never auto-continue.
+
+		if (isPlanModeActive(ctx) && (goal.status === "active" || goal.status === "budget_limited")) {
+			if (!planModeSuppressionNotified) {
+				ctx.ui.notify(
+					"Goal auto-continuation is paused while plan mode is active. Use /execute to resume goal continuation.",
+					"info",
+				);
+				planModeSuppressionNotified = true;
+			}
+			return;
+		}
+		planModeSuppressionNotified = false;
 
 		// Budget wrap-up: emit exactly once when status flipped to budget_limited.
 		if (goal.status === "budget_limited" && !budgetWrapUpSent) {
