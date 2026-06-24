@@ -50,6 +50,7 @@ case "$mode" in
     run_step "memories tools"         $JS_RUNTIME tests/test-memories-tools.mjs
     run_step "context-diet unit"      $JS_RUNTIME tests/test-context-diet.mjs
     run_step "compaction-diet unit"   $JS_RUNTIME tests/test-compaction-diet.mjs
+    run_step "large-context autocompact" $JS_RUNTIME tests/test-large-context-autocompact.mjs
     run_step "context-diet e2e"       $JS_RUNTIME tests/test-context-diet-e2e.mjs
     run_step "tool-pairing-guard"     $JS_RUNTIME tests/test-tool-pairing-guard.mjs
     ;;
@@ -77,6 +78,7 @@ case "$mode" in
     run_step "memories tools"         $JS_RUNTIME tests/test-memories-tools.mjs
     run_step "context-diet unit"      $JS_RUNTIME tests/test-context-diet.mjs
     run_step "compaction-diet unit"   $JS_RUNTIME tests/test-compaction-diet.mjs
+    run_step "large-context autocompact" $JS_RUNTIME tests/test-large-context-autocompact.mjs
     run_step "context-diet e2e"       $JS_RUNTIME tests/test-context-diet-e2e.mjs
     run_step "tool-pairing-guard"     $JS_RUNTIME tests/test-tool-pairing-guard.mjs
     run_step "harness (all)"          python3 tests/harness.py

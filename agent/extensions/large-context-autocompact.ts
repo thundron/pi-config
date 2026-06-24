@@ -11,6 +11,8 @@ interface LargeContextAutocompactConfig {
 	enabled: boolean;
 	minContextWindow: number;
 	fraction: number;
+	postTurnEnabled: boolean;
+	postTurnDelayMs: number;
 }
 
 const STATUS_KEY = "large-context-autocompact";
@@ -33,14 +35,19 @@ const cfg: LargeContextAutocompactConfig = {
 	enabled: process.env.PI_LARGE_CONTEXT_AUTOCOMPACT_DISABLE !== "1",
 	minContextWindow: envInt("PI_LARGE_CONTEXT_AUTOCOMPACT_MIN_CONTEXT", 1_000_000),
 	fraction: envFraction("PI_LARGE_CONTEXT_AUTOCOMPACT_FRACTION", 0.5),
+	postTurnEnabled: process.env.PI_LARGE_CONTEXT_AUTOCOMPACT_POST_TURN_DISABLE !== "1",
+	postTurnDelayMs: envInt("PI_LARGE_CONTEXT_AUTOCOMPACT_POST_TURN_DELAY_MS", 250),
 };
 
 let compactionInFlight = false;
+let postTurnTimer: NodeJS.Timeout | undefined;
+let postTurnGeneration = 0;
 
 function shouldCompact(ctx: ExtensionContext): { compact: boolean; reason?: string } {
 	if (!cfg.enabled) return { compact: false, reason: "disabled" };
 	if (!ctx.isIdle()) return { compact: false, reason: "busy" };
 	if (compactionInFlight) return { compact: false, reason: "in-flight" };
+	if (ctx.hasPendingMessages()) return { compact: false, reason: "pending-messages" };
 
 	const usage = ctx.getContextUsage();
 	if (!usage || usage.tokens === null) return { compact: false, reason: "unknown" };
@@ -59,6 +66,61 @@ function replayInput(pi: ExtensionAPI, event: InputEvent): void {
 	pi.sendUserMessage([{ type: "text", text: event.text }, ...event.images]);
 }
 
+function clearPostTurnTimer(): void {
+	if (postTurnTimer) clearTimeout(postTurnTimer);
+	postTurnTimer = undefined;
+}
+
+function compactInstructions(mode: "pre-input" | "post-turn"): string {
+	return mode === "pre-input"
+		? "Preserve all current goals, active decisions, file edits, commands run, test results, blockers, and the exact user prompt that triggered this proactive large-context compaction."
+		: "Preserve all current goals, active decisions, file edits, commands run, test results, blockers, and the exact state at the end of the just-finished assistant turn. This proactive large-context compaction is running after the turn settled so the next user prompt does not have to wait for compaction.";
+}
+
+function startCompaction(
+	ctx: ExtensionContext,
+	mode: "pre-input" | "post-turn",
+	onComplete?: () => void,
+	onError?: (error: Error) => void,
+): void {
+	compactionInFlight = true;
+	ctx.compact({
+		customInstructions: compactInstructions(mode),
+		onComplete: () => {
+			compactionInFlight = false;
+			onComplete?.();
+		},
+		onError: (error) => {
+			compactionInFlight = false;
+			onError?.(error);
+		},
+	});
+}
+
+function schedulePostTurnCompaction(ctx: ExtensionContext): void {
+	if (!cfg.enabled || !cfg.postTurnEnabled) return;
+	postTurnGeneration += 1;
+	const generation = postTurnGeneration;
+	clearPostTurnTimer();
+	postTurnTimer = setTimeout(() => {
+		postTurnTimer = undefined;
+		if (generation !== postTurnGeneration) return;
+		const decision = shouldCompact(ctx);
+		if (!decision.compact) return;
+		const usage = ctx.getContextUsage();
+		if (ctx.hasUI) {
+			ctx.ui.notify(
+				`Large-context post-turn auto-compaction: ${usage?.tokens ?? "?"}/${usage?.contextWindow ?? "?"} tokens; compacting before the next prompt.`,
+				"info",
+			);
+		}
+		startCompaction(ctx, "post-turn", undefined, (error) => {
+			if (ctx.hasUI) ctx.ui.notify(`Large-context post-turn auto-compaction failed: ${error.message}`, "warning");
+		});
+	}, cfg.postTurnDelayMs);
+	if (typeof postTurnTimer.unref === "function") postTurnTimer.unref();
+}
+
 export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		if (ctx.hasUI) {
@@ -70,18 +132,25 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
+		clearPostTurnTimer();
 		if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, undefined);
+	});
+
+	pi.on("agent_end", async (_event, ctx) => {
+		schedulePostTurnCompaction(ctx);
 	});
 
 	pi.on("input", async (event, ctx) => {
 		// Avoid recursively intercepting the prompt replayed by this extension.
 		if (event.source === "extension") return { action: "continue" as const };
 
+		postTurnGeneration += 1;
+		clearPostTurnTimer();
+
 		const decision = shouldCompact(ctx);
 		if (!decision.compact) return { action: "continue" as const };
 
 		const usage = ctx.getContextUsage();
-		compactionInFlight = true;
 		if (ctx.hasUI) {
 			ctx.ui.notify(
 				`Large-context auto-compaction: ${usage?.tokens ?? "?"}/${usage?.contextWindow ?? "?"} tokens; replaying prompt after compact.`,
@@ -89,18 +158,15 @@ export default function (pi: ExtensionAPI) {
 			);
 		}
 
-		ctx.compact({
-			customInstructions: "Preserve all current goals, active decisions, file edits, commands run, test results, blockers, and the exact user prompt that triggered this proactive large-context compaction.",
-			onComplete: () => {
-				compactionInFlight = false;
-				replayInput(pi, event);
-			},
-			onError: (error) => {
-				compactionInFlight = false;
+		startCompaction(
+			ctx,
+			"pre-input",
+			() => replayInput(pi, event),
+			(error) => {
 				if (ctx.hasUI) ctx.ui.notify(`Large-context auto-compaction failed; sending prompt normally: ${error.message}`, "warning");
 				replayInput(pi, event);
 			},
-		});
+		);
 
 		return { action: "handled" as const };
 	});
@@ -108,5 +174,7 @@ export default function (pi: ExtensionAPI) {
 	(pi as unknown as { __largeContextAutocompactInternals?: unknown }).__largeContextAutocompactInternals = {
 		cfg,
 		shouldCompact,
+		schedulePostTurnCompaction,
+		compactInstructions,
 	};
 }

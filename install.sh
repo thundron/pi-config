@@ -175,6 +175,8 @@ link "$HOME/.pi/agent/extensions/context-tools.ts"        "agent/extensions/cont
 link "$HOME/.pi/agent/extensions/current-time.ts"         "agent/extensions/current-time.ts"
 link "$HOME/.pi/agent/extensions/rollout-budget.ts"       "agent/extensions/rollout-budget.ts"
 link "$HOME/.pi/agent/extensions/rollout-budget.README.md" "agent/extensions/rollout-budget.README.md"
+link "$HOME/.pi/agent/extensions/large-context-autocompact.ts" "agent/extensions/large-context-autocompact.ts"
+link "$HOME/.pi/agent/extensions/large-context-autocompact.README.md" "agent/extensions/large-context-autocompact.README.md"
 link "$HOME/.pi/agent/extensions/context-diet.ts"         "agent/extensions/context-diet.ts"
 link "$HOME/.pi/agent/extensions/context-diet.README.md"  "agent/extensions/context-diet.README.md"
 link "$HOME/.pi/agent/extensions/compaction-diet.ts"      "agent/extensions/compaction-diet.ts"
