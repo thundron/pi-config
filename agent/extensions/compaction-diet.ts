@@ -310,7 +310,8 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_before_compact", async (event, ctx) => {
 		if (!cfg.enabled) return undefined;
 
-		const { preparation, customInstructions, signal } = event;
+		const { preparation, customInstructions } = event;
+		const signal = event.signal ?? new AbortController().signal;
 		const all = [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages];
 		if (all.length === 0) return undefined; // nothing for us; let default decide
 
