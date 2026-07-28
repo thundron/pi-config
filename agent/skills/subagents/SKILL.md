@@ -45,7 +45,12 @@ Optional:
 - `cwd` — working dir for the sub-agent. Defaults to your current cwd.
 - `worktree_root` — if set, auto-creates a git worktree at
   `<root>/<runId>-<id>` and runs the sub-agent there. **Use this for
-  any task that modifies files** so siblings don't conflict.
+  any task that modifies files** so siblings don't conflict. These worktrees
+  are ephemeral: the extension automatically removes a clean worktree when
+  the child reaches a terminal state; its fleet branch and commits remain.
+- `retain_worktree` — exceptional opt-out from automatic terminal cleanup.
+  Defaults to `false`. Use only when the user explicitly needs a long-lived
+  worktree, and remove it as soon as that need ends.
 - `parent_ref` — git ref the worktree branches from. Defaults to `HEAD`.
 - `model` / `thinking` / `provider` — override your defaults for this
   sub-agent. Use a cheaper model for grunt work, a stronger one for
@@ -166,6 +171,25 @@ inspect / steer the run with `/subagents`:
 /subagents fire <manifest.json>    dispatch from a legacy pi-fleet manifest
 /subagents cap <N>                 set concurrency cap (1..64)
 ```
+
+## Mandatory worktree lifecycle
+
+This is an enforced hygiene invariant, not an optional recommendation:
+
+1. Extension-created worktrees default to ephemeral and are automatically
+   removed when a terminal child leaves them clean. Git branches/commits are
+   preserved for cherry-pick.
+2. A dirty terminal worktree fails closed: it is retained and
+   `WORKTREE_CLEANUP_REQUIRED` is returned. Resolve/integrate or explicitly
+   discard it before spawning another modifying agent or ending the task.
+3. `retain_worktree: true` is exceptional. Never use it merely to save build
+   cache; name the active reason in the parent task and clean it immediately
+   afterward.
+4. Never accumulate Cargo `target/`, `node_modules`, or other generated trees
+   across agent worktrees. Use an explicitly bounded shared cache or let
+   ephemeral cleanup remove them.
+5. Before a final response, `git worktree list` must contain no obsolete
+   `.pi-worktrees` entries.
 
 ## What runs in the sub-agent
 

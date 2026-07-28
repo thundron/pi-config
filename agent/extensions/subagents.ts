@@ -165,6 +165,11 @@ interface SpawnArgs {
 	cwd?: string;
 	/** Auto-create a git worktree at `<root>/<runId>-<id>` and run the child there. */
 	worktree_root?: string;
+	/**
+	 * Exceptional opt-out from automatic terminal cleanup. Ephemeral worktrees are
+	 * removed by default as soon as a clean child exits; their branch/commit remains.
+	 */
+	retain_worktree?: boolean;
 	/** Parent SHA / branch to base the worktree on. Defaults to HEAD. */
 	parent_ref?: string;
 	/** Model to use (overrides parent's default). */
@@ -192,6 +197,9 @@ interface AgentRecord {
 	instruction: string;
 	cwd: string;
 	worktree?: string;
+	retainWorktree?: boolean;
+	worktreeCleanedAt?: number;
+	worktreeCleanupError?: string;
 	model?: string;
 	thinking?: string;
 	provider?: string;
@@ -327,6 +335,38 @@ async function findRepoRoot(cwd: string): Promise<string> {
 	}
 }
 
+/**
+ * Remove a clean, extension-created ephemeral worktree after the child exits.
+ * The fleet branch and commit remain available for cherry-pick. Dirty worktrees
+ * are retained fail-closed and surfaced as an explicit cleanup error.
+ */
+async function cleanupEphemeralWorktree(rec: AgentRecord): Promise<void> {
+	if (!rec.worktree || rec.retainWorktree || rec.worktreeCleanedAt) return;
+	try {
+		const { stdout: status } = await execAsync(
+			"git status --porcelain=v1 --untracked-files=all",
+			{ cwd: rec.worktree },
+		);
+		if (status.trim()) {
+			throw new Error("dirty terminal worktree retained; integrate or discard it explicitly");
+		}
+		const { stdout: listing } = await execAsync("git worktree list --porcelain", {
+			cwd: rec.worktree,
+		});
+		const primary = listing
+			.split("\n")
+			.find((line) => line.startsWith("worktree "))
+			?.slice("worktree ".length);
+		if (!primary) throw new Error("cannot determine primary git worktree");
+		await execAsync(`git worktree remove --force ${shellQuote(rec.worktree)}`, { cwd: primary });
+		await execAsync("git worktree prune", { cwd: primary });
+		rec.worktreeCleanedAt = nowMs();
+		rec.worktreeCleanupError = undefined;
+	} catch (err) {
+		rec.worktreeCleanupError = err instanceof Error ? err.message : String(err);
+	}
+}
+
 // ─── Concurrency cap ────────────────────────────────────────────────────────
 
 /** Simple promise-based semaphore. Codex uses futures::FuturesUnordered with a Semaphore. */
@@ -375,7 +415,13 @@ const SpawnParams = Type.Object({
 	worktree_root: Type.Optional(
 		Type.String({
 			description:
-				"If set, creates a git worktree at <worktree_root>/<runId>-<id> and runs the sub-agent there.",
+				"If set, creates a git worktree at <worktree_root>/<runId>-<id> and runs the sub-agent there. Clean terminal worktrees are removed automatically by default; their branch and commits remain.",
+		}),
+	),
+	retain_worktree: Type.Optional(
+		Type.Boolean({
+			description:
+				"Exceptional opt-out from automatic terminal worktree cleanup. Defaults to false; use only for an explicitly long-lived worktree.",
 		}),
 	),
 	parent_ref: Type.Optional(
@@ -545,6 +591,7 @@ export default function (pi: ExtensionAPI) {
 			instruction: args.instruction,
 			cwd,
 			worktree,
+			retainWorktree: args.retain_worktree ?? false,
 			model: args.model,
 			thinking: args.thinking,
 			provider: args.provider,
@@ -627,11 +674,15 @@ export default function (pi: ExtensionAPI) {
 				}
 				record.endedAt = nowMs();
 				persistAgent(record);
+				await cleanupEphemeralWorktree(record);
+				persistAgent(record);
 				refreshFooter(ctx);
 			} catch (err) {
 				record.status = "error";
 				record.errorMessage = err instanceof Error ? err.message : String(err);
 				record.endedAt = nowMs();
+				persistAgent(record);
+				await cleanupEphemeralWorktree(record);
 				persistAgent(record);
 				refreshFooter(ctx);
 			} finally {
@@ -843,6 +894,8 @@ export default function (pi: ExtensionAPI) {
 				...records.map((r) =>
 					`  ${r.id.padEnd(12)} ${r.status.padEnd(10)} ${r.stopReason ?? ""}${
 						r.errorMessage ? `  err: ${r.errorMessage.slice(0, 80)}` : ""
+					}${r.worktreeCleanedAt ? "  worktree=cleaned" : ""}${
+						r.worktreeCleanupError ? `  WORKTREE_CLEANUP_REQUIRED: ${r.worktreeCleanupError}` : ""
 					}`,
 				),
 				"",
@@ -864,6 +917,8 @@ export default function (pi: ExtensionAPI) {
 						stopReason: r.stopReason,
 						errorMessage: r.errorMessage,
 						resultText: r.resultText,
+						worktreeCleanedAt: r.worktreeCleanedAt,
+						worktreeCleanupError: r.worktreeCleanupError,
 					})),
 				},
 			};
