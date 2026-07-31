@@ -165,9 +165,42 @@ function recentMessageCutoff(msgs: AgentMessage[], keepRecentTurns: number): num
 	return 0; // fewer than keepRecentTurns user messages exist → keep all
 }
 
-function makeStub(toolName: string, origBytes: number, mode: "compress" | "tear-out", original: string, cfg: DietConfig): string {
+/**
+ * Tool-specific, actionable recovery guidance embedded in a trim marker so the
+ * model knows exactly how to get the missing bytes back — scoped, not by
+ * blindly re-fetching the whole thing (which just gets re-trimmed). Kept terse
+ * on purpose: this rides inside every hinted stub, so verbosity here erodes the
+ * very savings the extension exists to produce.
+ */
+function recoveryHint(toolName: string): string {
+	switch (toolName.toLowerCase()) {
+		case "read":
+			return "grep the file for what you need to find its line, then Read only that range with offset/limit — don't re-read the whole file";
+		case "bash":
+			return "re-run it piped through grep/head/tail/sed -n 'A,Bp' to return only the lines you need";
+		case "grep":
+		case "glob":
+		case "find":
+			return "tighten the pattern/path (or add -m/head) so fewer matches come back";
+		default:
+			return "re-issue the request scoped to just the portion you need";
+	}
+}
+
+function makeStub(
+	toolName: string,
+	origBytes: number,
+	mode: "compress" | "tear-out",
+	original: string,
+	cfg: DietConfig,
+	hint = "",
+): string {
+	// Recovery clause: only present when the caller judged this result worth
+	// re-fetching (size-triggered trims). "re-fetch is re-trimmed" is the key
+	// nudge that breaks the read-whole-file → trimmed → retry loop.
+	const recover = hint ? ` To see more: ${hint}. A full re-fetch is re-trimmed.` : "";
 	if (mode === "tear-out") {
-		return `[tool ${toolName} result torn out by context-diet — ${origBytes}B reclaimed; full content preserved on disk]`;
+		return `[context-diet tore out ${toolName} result — ${origBytes}B reclaimed; original retained in session history (restored verbatim on /resume).${recover}]`;
 	}
 	// compress
 	if (origBytes <= cfg.headBytes + cfg.tailBytes + 80) {
@@ -177,7 +210,7 @@ function makeStub(toolName: string, origBytes: number, mode: "compress" | "tear-
 	const head = original.slice(0, cfg.headBytes);
 	const tail = original.slice(original.length - cfg.tailBytes);
 	const trimmed = origBytes - byteLen(head) - byteLen(tail);
-	return `${head}\n\n[... context-diet trimmed ${trimmed}B; ${origBytes}B → ${cfg.headBytes + cfg.tailBytes}B; full content preserved on disk ...]\n\n${tail}`;
+	return `${head}\n\n[... context-diet trimmed ${trimmed}B (${origBytes}B → ${byteLen(head) + byteLen(tail)}B); original retained in session history.${recover} ...]\n\n${tail}`;
 }
 
 /**
@@ -201,7 +234,19 @@ function rewriteToolResult(
 	if (!force && !eligibleBySize) return { msg, trimmed: false, bytesSaved: 0 };
 	if (origBytes < 256 && cfg.mode === "compress") return { msg, trimmed: false, bytesSaved: 0 };
 
-	const stub = makeStub(tr.toolName, origBytes, cfg.mode, origText, cfg);
+	// Attach recovery guidance only to size-triggered trims: those represent
+	// content the model actively fetched and may still need to expand. Purely
+	// age-based (force) trims are results the model has already moved past, so
+	// we omit the hint there to avoid paying for boilerplate it won't act on.
+	const withHint = eligibleBySize;
+	const stub = makeStub(
+		tr.toolName,
+		origBytes,
+		cfg.mode,
+		origText,
+		cfg,
+		withHint ? recoveryHint(tr.toolName) : "",
+	);
 	const newBytes = byteLen(stub);
 	if (newBytes >= origBytes) return { msg, trimmed: false, bytesSaved: 0 };
 

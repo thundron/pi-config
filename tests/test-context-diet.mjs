@@ -125,6 +125,15 @@ ok("tear-out stub is short", byteLen(torn) < 200);
 ok("tear-out names the tool",  torn.includes("bash"));
 ok("tear-out names byte savings", torn.includes("B reclaimed"));
 
+// recovery guidance: present only when a hint is supplied, and tool-specific
+const noHint = makeStub("read", byteLen(big), "compress", big, cfg);
+ok("no recovery clause without a hint", !noHint.includes("To see more"));
+const readHint = makeStub("read", byteLen(big), "compress", big, cfg, "grep the file for what you need to find its line, then Read only that range with offset/limit — don't re-read the whole file");
+ok("read stub carries an actionable recovery clause", readHint.includes("To see more") && readHint.includes("offset/limit") && readHint.includes("grep"));
+ok("read stub warns re-fetch is re-trimmed", readHint.includes("re-fetch is re-trimmed"));
+const bashHint = makeStub("bash", byteLen(big), "tear-out", big, cfg, "re-run it piped through grep/head/tail/sed -n 'A,Bp' to return only the lines you need");
+ok("tear-out stub can carry a recovery clause too", bashHint.includes("To see more") && bashHint.includes("grep"));
+
 const tiny = "small output";
 const noop = makeStub("bash", byteLen(tiny), "compress", tiny, cfg);
 ok("compress passthrough when smaller than head+tail+overhead", noop === tiny);
@@ -177,7 +186,7 @@ cfg.preserveErrors = true;
 const teared = rewriteContext(branch, cfg);
 ok("tear-out trims all eligible tool results", teared.trimmed === 3);
 const trText = teared.msgs.find((m, i) => m.role === "toolResult").content[0].text;
-ok("tear-out replaced content with a tear-out stub", trText.includes("torn out"));
+ok("tear-out replaced content with a tear-out stub", trText.includes("tore out"));
 ok("tear-out savings > compress savings (rough)", teared.bytesSaved > 50000);
 
 // ─── small tool results are left alone in compress mode ───────────────────

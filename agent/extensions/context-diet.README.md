@@ -44,11 +44,37 @@ load-bearing, and the model often needs them to course-correct.
 
 - `compress` (default): keep the first `headBytes` (default 512) and last
   `tailBytes` (default 256) of the original, with a `[... context-diet
-  trimmed NB; was XB; full content preserved on disk ...]` marker in between.
-  The model still sees enough teaser to know what the tool did.
-- `tear-out`: replace the entire content with `[tool <name> result torn out
-  by context-diet — NB reclaimed; full content preserved on disk]`. Maximum
-  savings; the model only sees that *something happened*.
+  trimmed NB (XB → YB); original retained in session history. ...]` marker in
+  between. The model still sees enough teaser to know what the tool did.
+- `tear-out`: replace the entire content with `[context-diet tore out <name>
+  result — NB reclaimed; original retained in session history (restored
+  verbatim on /resume)]`. Maximum savings; the model only sees that
+  *something happened*.
+
+## Actionable recovery guidance
+
+A trim marker is a dead-end if it only says "content removed" — the model
+tends to blindly re-fetch the whole thing, which just gets re-trimmed, and it
+retries repeatedly. So **size-triggered** trims (a single result over
+`maxResultBytes` — i.e. content the model actively fetched and may still need)
+embed a short, tool-specific recovery clause:
+
+- `read`  → *grep the file for what you need to find its line, then Read only
+  that range with offset/limit — don't re-read the whole file*
+- `bash`  → *re-run it piped through grep/head/tail/sed -n 'A,Bp' to return
+  only the lines you need*
+- `grep`/`glob`/`find` → *tighten the pattern/path (or add -m/head) so fewer
+  matches come back*
+- anything else → *re-issue the request scoped to just the portion you need*
+
+Every hinted marker also states **"a full re-fetch is re-trimmed"** — the
+nudge that breaks the read-whole-file → trimmed → retry loop.
+
+Purely **age-based** trims (results pushed past the recent-turn cutoff that
+the model has already moved past) omit the clause: the guidance would be
+boilerplate the model won't act on, and it exists to *save* tokens. Keeping
+the hint terse is deliberate for the same reason — it rides inside every
+hinted stub.
 
 ## Slash command
 
