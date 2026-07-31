@@ -336,28 +336,50 @@ async function findRepoRoot(cwd: string): Promise<string> {
 }
 
 /**
- * Remove a clean, extension-created ephemeral worktree after the child exits.
- * The fleet branch and commit remain available for cherry-pick. Dirty worktrees
- * are retained fail-closed and surfaced as an explicit cleanup error.
+ * Remove an extension-created ephemeral worktree after the child exits.
+ *
+ * A worktree is safe to remove when it holds no *meaningful* uncommitted work:
+ * committed work survives on its fleet branch (available for cherry-pick), and
+ * gitignored build output (`target/`, `node_modules/`, `dist/`, …) is treated
+ * as disposable. Uncommitted tracked changes or new untracked source files
+ * fail closed — the worktree is retained and `worktreeCleanupError` is set so
+ * the caller can integrate or discard the work deliberately.
  */
 async function cleanupEphemeralWorktree(rec: AgentRecord): Promise<void> {
 	if (!rec.worktree || rec.retainWorktree || rec.worktreeCleanedAt) return;
+	// Already gone (e.g. removed by hand or a prior run): treat as cleaned.
+	if (!existsSync(rec.worktree)) {
+		rec.worktreeCleanedAt = nowMs();
+		rec.worktreeCleanupError = undefined;
+		return;
+	}
 	try {
+		// `--untracked-files=normal` respects .gitignore, so disposable build
+		// artifacts do not count as dirty; genuine new source files still do.
 		const { stdout: status } = await execAsync(
-			"git status --porcelain=v1 --untracked-files=all",
+			"git status --porcelain=v1 --untracked-files=normal",
 			{ cwd: rec.worktree },
 		);
 		if (status.trim()) {
-			throw new Error("dirty terminal worktree retained; integrate or discard it explicitly");
+			throw new Error(
+				`uncommitted work in ${rec.worktree}; commit it to the fleet branch, ` +
+					"or pass retain_worktree to keep it, then remove it deliberately",
+			);
 		}
+		// The primary worktree is always the first entry; we must run `remove`
+		// from outside the worktree being removed.
 		const { stdout: listing } = await execAsync("git worktree list --porcelain", {
 			cwd: rec.worktree,
 		});
 		const primary = listing
 			.split("\n")
+			.map((line) => line.trim())
 			.find((line) => line.startsWith("worktree "))
 			?.slice("worktree ".length);
 		if (!primary) throw new Error("cannot determine primary git worktree");
+		// --force is required only to discard the gitignored build output we
+		// deliberately classified as safe above; tracked/untracked work has
+		// already fail-closed, so this never destroys meaningful changes.
 		await execAsync(`git worktree remove --force ${shellQuote(rec.worktree)}`, { cwd: primary });
 		await execAsync("git worktree prune", { cwd: primary });
 		rec.worktreeCleanedAt = nowMs();

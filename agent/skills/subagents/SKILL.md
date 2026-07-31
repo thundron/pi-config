@@ -177,17 +177,20 @@ inspect / steer the run with `/subagents`:
 This is an enforced hygiene invariant, not an optional recommendation:
 
 1. Extension-created worktrees default to ephemeral and are automatically
-   removed when a terminal child leaves them clean. Git branches/commits are
-   preserved for cherry-pick.
-2. A dirty terminal worktree fails closed: it is retained and
-   `WORKTREE_CLEANUP_REQUIRED` is returned. Resolve/integrate or explicitly
-   discard it before spawning another modifying agent or ending the task.
+   removed when a terminal child leaves no uncommitted work. Committed work
+   survives on its fleet branch (available for cherry-pick), and gitignored
+   build output (`target/`, `node_modules/`, `dist/`, …) is treated as
+   disposable and removed with the worktree.
+2. A worktree with uncommitted tracked changes or new untracked source files
+   fails closed: it is retained and `WORKTREE_CLEANUP_REQUIRED` is returned.
+   Commit the work to the fleet branch (or explicitly discard it) before
+   spawning another modifying agent or ending the task.
 3. `retain_worktree: true` is exceptional. Never use it merely to save build
    cache; name the active reason in the parent task and clean it immediately
    afterward.
-4. Never accumulate Cargo `target/`, `node_modules`, or other generated trees
-   across agent worktrees. Use an explicitly bounded shared cache or let
-   ephemeral cleanup remove them.
+4. Do not rely on generated trees (Cargo `target/`, `node_modules`) persisting
+   across agent worktrees — ephemeral cleanup discards them. If you need a
+   warm cache, use an explicitly bounded shared cache outside the worktree.
 5. Before a final response, `git worktree list` must contain no obsolete
    `.pi-worktrees` entries.
 
