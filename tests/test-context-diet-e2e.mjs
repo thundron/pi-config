@@ -10,7 +10,7 @@
 // it deterministic even when the machine is busy (e.g. running in the full
 // suite right after the typecheck/tsc step), where a fixed warmup would race
 // pi's startup and the prompt would land before the agent loop is ready.
-// Usage: bun run tests/test-context-diet-e2e.mjs
+// Usage: node tests/test-context-diet-e2e.mjs
 
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";

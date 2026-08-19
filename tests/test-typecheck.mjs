@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Typecheck pi extensions against the installed pi-coding-agent .d.ts files.
 //
-// Why this exists: pi loads .ts extensions via bun's loader, which strips
+// Why this exists: pi loads .ts extensions with a type-stripping loader, which
 // types without type-checking. That means contract violations against
 // pi-coding-agent / pi-tui types reach the user as TUI crashes
 // (e.g. `Cannot read properties of undefined (reading 'endsWith')` when

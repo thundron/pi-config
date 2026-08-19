@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Validate bundled pi agent-role JSON files.
-// Usage: bun run tests/test-agent-roles.mjs
+// Usage: node tests/test-agent-roles.mjs
 
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";

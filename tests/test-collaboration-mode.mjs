@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Unit tests for plan-mode.ts collaboration-mode controls.
-// Usage: bun run tests/test-collaboration-mode.mjs
+// Usage: node tests/test-collaboration-mode.mjs
 
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -9,8 +9,7 @@ import { spawnSync } from "node:child_process";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 if (!process.env.PI_COLLABORATION_MODE_TEST_BOOTSTRAPPED) {
-	const isBun = typeof globalThis.Bun !== "undefined" || /bun/i.test(process.execPath);
-	if (!isBun) {
+	{
 		const hook = resolve(__dirname, "lib", "stub-hook-register.mjs");
 		const r = spawnSync(
 			process.execPath,

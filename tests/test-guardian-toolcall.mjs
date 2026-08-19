@@ -17,9 +17,8 @@
  *
  * Runs cross-platform (macOS / Linux / WSL) — no shell-out, just JS.
  *
- * Usage:  bun run tests/test-guardian-toolcall.mjs
+ * Usage:  node tests/test-guardian-toolcall.mjs
  *    or:  node --experimental-strip-types tests/test-guardian-toolcall.mjs
- *         (bun is preferred since pi itself uses bun for .ts extensions)
  */
 
 import { fileURLToPath } from "node:url";
@@ -33,8 +32,7 @@ import { spawnSync } from "node:child_process";
 // nested deps natively and skips this branch.
 const __dirname0 = dirname(fileURLToPath(import.meta.url));
 if (!process.env.PI_GUARDIAN_TEST_BOOTSTRAPPED) {
-	const isBun = typeof globalThis.Bun !== "undefined" || /bun/i.test(process.execPath);
-	if (!isBun) {
+	{
 		const hook = resolve(__dirname0, "lib", "stub-hook-register.mjs");
 		const r = spawnSync(
 			process.execPath,

@@ -2,8 +2,13 @@
 //
 // Background: pi extensions import from @earendil-works/pi-coding-agent and
 // its workspace siblings (pi-ai, pi-agent-core, pi-tui), plus typebox. Those
-// packages live in pi-coding-agent's NESTED node_modules. Under bun the
-// nested-deps resolution works; under stand-alone node it doesn't.
+// packages live in pi-coding-agent's NESTED node_modules, which stand-alone
+// node does not resolve from this repo.
+//
+// NOTE: ESM named exports are static, so every value symbol an extension
+// imports must appear in STUB_SOURCE below or the import throws
+// "does not provide an export named 'x'". Keep it in sync with:
+//   grep -h '^import {' agent/extensions/*.ts
 //
 // For tests that only exercise our extension code (not the real pi runtime)
 // we don't need real implementations — only stubs that satisfy the imports.
@@ -45,7 +50,17 @@ const STUB_SOURCE = [
 	"});",
 	"const stub = makeStub();",
 	"export default stub;",
-	"export const estimateTokens = () => 0;",
+	// Mirrors pi's own chars/4 heuristic so token-budget math stays meaningful
+	// in unit tests (a constant 0 makes every budget assertion vacuous).
+	"export const estimateTokens = (m) => {",
+	"  const c = m && m.content;",
+	"  const text = typeof c === 'string' ? c : Array.isArray(c) ? c.map((b) => (b && b.type === 'text' && typeof b.text === 'string' ? b.text : '')).join('') : '';",
+	"  return Math.ceil(text.length / 4);",
+	"};",
+	// compaction-diet: bounded summarization helpers.
+	"export const generateSummary = async () => 'stub summary';",
+	"export const serializeConversation = () => '';",
+	"export const convertToLlm = (messages) => messages;",
 	// Real impl: returns true iff event.toolName === toolName. Mirror that so
 	// extensions that key behaviour on isToolCallEventType (e.g. guardian.ts's
 	// bash gate) still work under the stub.

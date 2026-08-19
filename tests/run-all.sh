@@ -1,28 +1,36 @@
 #!/usr/bin/env bash
 # Run every test (execpolicy unit → guardian tool_call → RPC harness).
 # Usage: run-all.sh | run-all.sh --quick | run-all.sh harness [names...]
-set -euo pipefail
+#
+# Every step runs even when an earlier one fails; failures are summarized at
+# the end and the script exits non-zero. (A single red step used to hide the
+# other fifteen.)
+set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 mode="${1:-all}"
 
-# Pick a JS runtime: bun preferred (pi itself uses bun for .ts), node fallback.
-if command -v bun >/dev/null 2>&1; then
-  JS_RUNTIME="bun run"
-elif command -v node >/dev/null 2>&1; then
+# Node is the only supported test runtime. Tests that import .ts extensions
+# self-respawn under `--experimental-strip-types` with tests/lib/stub-hook.mjs.
+if command -v node >/dev/null 2>&1; then
   JS_RUNTIME="node"
 else
-  echo "tests/run-all.sh: need bun or node on PATH" >&2
+  echo "tests/run-all.sh: need node on PATH" >&2
   exit 127
 fi
+
+failed_steps=()
 
 run_step() {
   local label="$1"
   shift
   printf '\n══ %s ══\n' "$label"
-  "$@"
+  if ! "$@"; then
+    failed_steps+=("$label")
+    printf '✗ %s FAILED\n' "$label"
+  fi
 }
 
 case "$mode" in
@@ -88,5 +96,11 @@ case "$mode" in
     exit 2
     ;;
 esac
+
+if [ ${#failed_steps[@]} -gt 0 ]; then
+  printf '\n%d step(s) failed:\n' "${#failed_steps[@]}"
+  for step in "${failed_steps[@]}"; do printf '  ✗ %s\n' "$step"; done
+  exit 1
+fi
 
 printf '\nAll tests passed.\n'

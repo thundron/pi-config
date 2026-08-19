@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Unit tests for current-time.ts.
-// Usage: bun run tests/test-current-time.mjs
+// Usage: node tests/test-current-time.mjs
 
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -9,8 +9,7 @@ import { spawnSync } from "node:child_process";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 if (!process.env.PI_CURRENT_TIME_TEST_BOOTSTRAPPED) {
-	const isBun = typeof globalThis.Bun !== "undefined" || /bun/i.test(process.execPath);
-	if (!isBun) {
+	{
 		const hook = resolve(__dirname, "lib", "stub-hook-register.mjs");
 		const r = spawnSync(
 			process.execPath,

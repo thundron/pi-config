@@ -34,8 +34,20 @@ assert(
 	"goal-mode must delay clearing the compaction guard so Pi core can run post-compaction continue() first",
 );
 assert(
-	src.includes("postAgentCompactionInFlight || !ctx.isIdle() || ctx.hasPendingMessages()"),
-	"goal-mode auto-continuation must retry while compaction/busy/pending state exists",
+	/postAgentCompactionInFlight \|\|\s*compactionIntentActive\(\) \|\|\s*!ctx\.isIdle\(\) \|\|\s*ctx\.hasPendingMessages\(\)/.test(src),
+	"goal-mode auto-continuation must retry while compaction/intent/busy/pending state exists",
+);
+assert(
+	src.includes("compactionIntentActive") && src.includes("__piCompactionIntent"),
+	"goal-mode must honor the cross-extension compaction intent flag (ctx.compact() refuses prompts before session_before_compact is emitted)",
+);
+assert(
+	src.includes("armDeliveryCheck") && src.includes("countUserMessages"),
+	"goal-mode must verify that a fired continuation was actually accepted (pi swallows sendUserMessage rejections)",
+);
+assert(
+	src.includes('pi.on("agent_settled"'),
+	"goal-mode should anchor auto-continuation on agent_settled, which fires only once no retry/compaction/queued continuation remains",
 );
 assert(
 	src.includes('pi.sendUserMessage(prompt, { deliverAs: "followUp" });'),
@@ -48,6 +60,20 @@ assert(
 assert(
 	/scheduleContinuation\(CONTINUATION_PROMPT\(live\), pi, ctx\)/.test(src),
 	"/goal resume should use the guarded scheduler when it re-engages the agent",
+);
+
+// The producer half of the compaction-intent contract.
+const autocompactSrc = readFileSync(
+	join(REPO_ROOT, "agent/extensions/large-context-autocompact.ts"),
+	"utf8",
+);
+assert(
+	/const releaseIntent = beginCompactionIntent\(\);[\s\S]{0,200}ctx\.compact\(/.test(autocompactSrc),
+	"large-context-autocompact must publish compaction intent BEFORE calling ctx.compact()",
+);
+assert(
+	(autocompactSrc.match(/releaseIntent\(\);/g) ?? []).length >= 2,
+	"large-context-autocompact must release compaction intent on both onComplete and onError",
 );
 
 console.log("test-goal-mode-runtime-race: OK");

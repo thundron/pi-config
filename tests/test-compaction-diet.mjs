@@ -3,7 +3,7 @@
 // its trimForSummary() / makeStub() / planChunks() / computeBudgets() /
 // parseModelRef() helpers through the __compactionDietInternals back-door the
 // extension installs on the pi mock for testing.
-// Usage: bun run tests/test-compaction-diet.mjs
+// Usage: node tests/test-compaction-diet.mjs
 
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -14,8 +14,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Self-respawn under the stub-hook so compaction-diet.ts's imports of
 // @earendil-works/* (nested deps in pi-coding-agent) resolve under node.
 if (!process.env.PI_COMPACTION_DIET_TEST_BOOTSTRAPPED) {
-	const isBun = typeof globalThis.Bun !== "undefined" || /bun/i.test(process.execPath);
-	if (!isBun) {
+	{
 		const hook = resolve(__dirname, "lib", "stub-hook-register.mjs");
 		const r = spawnSync(
 			process.execPath,

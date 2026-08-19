@@ -3,7 +3,7 @@
 //
 // The label bug (TUI crash on `item.label.endsWith("/")` because
 // `getArgumentCompletions` returned items without `label`) escaped because:
-//   1. extension .ts files are loaded by bun's loader without type-checking
+//   1. extension .ts files are loaded by a type-stripping loader (no checking)
 //   2. our harness exercises `/cmd <args>` but not the autocomplete path
 //      (RPC mode has no `get_argument_completions` endpoint)
 //
@@ -14,8 +14,8 @@
 //
 //   { value: string; label: string; description?: string }
 //
-// Skips with exit 0 if neither `bun` nor `tsx`/equivalent .ts loader is
-// available (pi extensions are .ts, plain `node` can't import them).
+// Skips with exit 0 when this node build cannot strip TypeScript types
+// (pi extensions are .ts, so a .ts-capable loader is required).
 
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -30,16 +30,15 @@ function which(cmd) {
 	return r.status === 0 ? r.stdout.trim().split(/\r?\n/)[0] : null;
 }
 
-// Need a TS-capable loader. Prefer bun (pi itself uses it).
-const bun = which("bun");
+// Need a TS-capable loader: node with --experimental-strip-types.
 const nodeWithStripTypes = (() => {
 	// Node 22+ has --experimental-strip-types; node 23+ has it on by default for .ts
 	const r = spawnSync(process.execPath, ["--experimental-strip-types", "-e", "''"], { encoding: "utf8" });
 	return r.status === 0;
 })();
 
-if (!bun && !nodeWithStripTypes) {
-	console.error("test-autocomplete: need bun or node with --experimental-strip-types — skipping.");
+if (!nodeWithStripTypes) {
+	console.error("test-autocomplete: need node with --experimental-strip-types — skipping.");
 	process.exit(0);
 }
 
@@ -202,24 +201,16 @@ const runnerPath = join(work, "runner.mjs");
 writeFileSync(runnerPath, runnerJs);
 
 try {
-	let cmd, args;
-	if (bun) {
-		// bun follows nested node_modules natively — no stub hook needed.
-		cmd = bun;
-		args = ["run", runnerPath, EXT_DIR];
-	} else {
-		cmd = process.execPath;
-		const hookRegister = resolve(REPO_ROOT, "tests/lib/stub-hook-register.mjs");
-		args = [
-			"--experimental-strip-types",
-			"--no-warnings=DeprecationWarning",
-			"--import",
-			hookRegister,
-			runnerPath,
-			EXT_DIR,
-		];
-	}
-	const r = spawnSync(cmd, args, { stdio: "inherit" });
+	const hookRegister = resolve(REPO_ROOT, "tests/lib/stub-hook-register.mjs");
+	const args = [
+		"--experimental-strip-types",
+		"--no-warnings=DeprecationWarning",
+		"--import",
+		hookRegister,
+		runnerPath,
+		EXT_DIR,
+	];
+	const r = spawnSync(process.execPath, args, { stdio: "inherit" });
 	process.exit(r.status ?? 1);
 } finally {
 	try { rmSync(work, { recursive: true, force: true }); } catch { /* ignore */ }

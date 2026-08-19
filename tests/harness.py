@@ -163,8 +163,10 @@ def s_plan_mode() -> ExtensionTest:
         scenarios=[
             Scenario("plan on", "/plan", expect_notify_contains="Plan mode ON"),
             Scenario("plan idempotent", "/plan", expect_notify_contains="Already in plan mode"),
-            Scenario("execute off", "/execute", expect_notify_contains="Plan mode OFF"),
-            Scenario("execute idempotent", "/execute", expect_notify_contains="Not in plan mode"),
+            # /execute is the "execute" collaboration mode since the codex
+            # collaboration-modes port: it exits plan mode and restores tools.
+            Scenario("execute off", "/execute", expect_notify_contains="Collaboration mode set to execute"),
+            Scenario("execute idempotent", "/execute", expect_notify_contains="Tools restored to"),
         ],
     )
 

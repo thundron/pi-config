@@ -3,7 +3,7 @@
 // its repairToolPairing() helper through the __toolPairingGuardInternals
 // back-door, asserting orphaned tool_results are dropped and dangling
 // tool_uses are backfilled in the (Anthropic-shaped) provider payload.
-// Usage: bun run tests/test-tool-pairing-guard.mjs
+// Usage: node tests/test-tool-pairing-guard.mjs
 
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -14,8 +14,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Self-respawn under the stub-hook so the extension's @earendil-works/* imports
 // resolve under node (mirrors test-context-diet.mjs).
 if (!process.env.PI_TOOL_PAIRING_GUARD_TEST_BOOTSTRAPPED) {
-	const isBun = typeof globalThis.Bun !== "undefined" || /bun/i.test(process.execPath);
-	if (!isBun) {
+	{
 		const hook = resolve(__dirname, "lib", "stub-hook-register.mjs");
 		const r = spawnSync(
 			process.execPath,

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Unit tests for large-context-autocompact.ts.
-// Usage: bun run tests/test-large-context-autocompact.mjs
+// Usage: node tests/test-large-context-autocompact.mjs
 
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -9,8 +9,7 @@ import { spawnSync } from "node:child_process";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 if (!process.env.PI_LARGE_CONTEXT_AUTOCOMPACT_TEST_BOOTSTRAPPED) {
-	const isBun = typeof globalThis.Bun !== "undefined" || /bun/i.test(process.execPath);
-	if (!isBun) {
+	{
 		const hook = resolve(__dirname, "lib", "stub-hook-register.mjs");
 		const r = spawnSync(
 			process.execPath,
