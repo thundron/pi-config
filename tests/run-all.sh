@@ -46,6 +46,7 @@ case "$mode" in
     run_step "guardian tool_call"     $JS_RUNTIME tests/test-guardian-toolcall.mjs
     run_step "goal runtime race"      $JS_RUNTIME tests/test-goal-mode-runtime-race.mjs
     run_step "goal-mode tools"        $JS_RUNTIME tests/test-goal-mode-tools.mjs
+    run_step "goal compaction race"   $JS_RUNTIME tests/test-goal-mode-compaction-race.mjs
     run_step "plan-mode prompt"       $JS_RUNTIME tests/test-plan-mode-prompt.mjs
     run_step "collaboration mode"     $JS_RUNTIME tests/test-collaboration-mode.mjs
     run_step "terminal-title"         $JS_RUNTIME tests/test-terminal-title.mjs
@@ -74,6 +75,7 @@ case "$mode" in
     run_step "guardian tool_call"     $JS_RUNTIME tests/test-guardian-toolcall.mjs
     run_step "goal runtime race"      $JS_RUNTIME tests/test-goal-mode-runtime-race.mjs
     run_step "goal-mode tools"        $JS_RUNTIME tests/test-goal-mode-tools.mjs
+    run_step "goal compaction race"   $JS_RUNTIME tests/test-goal-mode-compaction-race.mjs
     run_step "plan-mode prompt"       $JS_RUNTIME tests/test-plan-mode-prompt.mjs
     run_step "collaboration mode"     $JS_RUNTIME tests/test-collaboration-mode.mjs
     run_step "terminal-title"         $JS_RUNTIME tests/test-terminal-title.mjs

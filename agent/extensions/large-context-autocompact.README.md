@@ -26,5 +26,6 @@ PI_LARGE_CONTEXT_AUTOCOMPACT_POST_TURN_DELAY_MS=250
 ## Notes
 
 - Post-turn compaction is skipped when pi is busy, when a compaction is already in-flight, or when there are queued/pending messages.
+- **Compaction intent is published before `ctx.compact()` is called.** Pi's `AgentSession.prompt()` rejects every prompt from the instant that call installs its abort controller, but the `session_before_compact` extension event is only emitted afterwards (behind an `abort()` await, an auth await, and a full-branch `prepareCompaction()` pass). Extensions that schedule their own prompts — `goal-mode` — watch the `globalThis.__piCompactionIntent` counter this extension maintains so they hold across that unannounced window instead of firing a prompt pi will refuse.
 - A prompt replayed by this extension uses `event.source === "extension"`, so it bypasses the pre-input compaction hook and cannot recurse.
 - The summary instructions explicitly preserve goals, decisions, edits, commands, test results, blockers, and the end-of-turn state.

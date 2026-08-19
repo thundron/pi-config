@@ -43,6 +43,41 @@ let compactionInFlight = false;
 let postTurnTimer: NodeJS.Timeout | undefined;
 let postTurnGeneration = 0;
 
+// ─── Cross-extension compaction intent ──────────────────────────────────────
+//
+// Pi's `AgentSession.prompt()` rejects every prompt from the moment
+// `ctx.compact()` installs its abort controller. That happens *before* the
+// `session_before_compact` extension event is emitted — an `abort()` await, an
+// auth resolution await, and a full-branch `prepareCompaction()` pass sit in
+// between — so extensions that only watch `session_before_compact` (goal-mode)
+// see a window where compaction is already fatal to prompts but not yet
+// announced. Publishing the intent here closes that window: goal-mode's
+// auto-continuation holds while `count > 0`.
+//
+// A process-global counter (rather than an import) keeps the two extensions
+// independently loadable — pi loads each file in isolation.
+
+interface CompactionIntentRegistry {
+	count: number;
+}
+
+function compactionIntentRegistry(): CompactionIntentRegistry {
+	const g = globalThis as { __piCompactionIntent?: CompactionIntentRegistry };
+	if (!g.__piCompactionIntent) g.__piCompactionIntent = { count: 0 };
+	return g.__piCompactionIntent;
+}
+
+function beginCompactionIntent(): () => void {
+	const registry = compactionIntentRegistry();
+	registry.count += 1;
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		registry.count = Math.max(0, registry.count - 1);
+	};
+}
+
 function shouldCompact(ctx: ExtensionContext): { compact: boolean; reason?: string } {
 	if (!cfg.enabled) return { compact: false, reason: "disabled" };
 	if (!ctx.isIdle()) return { compact: false, reason: "busy" };
@@ -84,14 +119,19 @@ function startCompaction(
 	onError?: (error: Error) => void,
 ): void {
 	compactionInFlight = true;
+	// Publish intent BEFORE ctx.compact() — pi starts refusing prompts inside
+	// that call, well before any extension event announces the compaction.
+	const releaseIntent = beginCompactionIntent();
 	ctx.compact({
 		customInstructions: compactInstructions(mode),
 		onComplete: () => {
 			compactionInFlight = false;
+			releaseIntent();
 			onComplete?.();
 		},
 		onError: (error) => {
 			compactionInFlight = false;
+			releaseIntent();
 			onError?.(error);
 		},
 	});
@@ -176,5 +216,7 @@ export default function (pi: ExtensionAPI) {
 		shouldCompact,
 		schedulePostTurnCompaction,
 		compactInstructions,
+		startCompaction,
+		compactionIntentRegistry,
 	};
 }

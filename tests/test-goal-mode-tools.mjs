@@ -124,5 +124,45 @@ console.log("\n=== plan mode suppresses auto-continuation ===");
 	ok("notifies about plan-mode suppression", notifications.some((n) => n.message.includes("plan mode") && n.type === "info"), JSON.stringify(notifications));
 }
 
+console.log("\n=== budget limit emits the wrap-up prompt ===");
+{
+	// Regression: refresh() used to re-sync `budgetWrapUpSent` from the branch on
+	// every event. turn_end appends the budget_limited status and refreshes, so by
+	// the time agent_end looked, the flag was already true and the budget wrap-up
+	// prompt could never be sent — the goal just went silent at the budget.
+	const branch = [
+		{ type: "custom", customType: "goal/set", data: { objective: "spend wisely", tokenBudget: 100, t: 1 } },
+		{ type: "message", message: { role: "assistant", usage: { input: 90, output: 30 } } },
+	];
+	const ctx = {
+		hasUI: true,
+		sessionManager: { getBranch: () => branch },
+		ui: { setStatus: () => {}, notify: () => {} },
+		isIdle: () => true,
+		hasPendingMessages: () => false,
+	};
+	// pi.appendEntry writes into the same branch the mock reads back.
+	const appendToBranch = (customType, data) => branch.push({ type: "custom", customType, data });
+	const originalAppend = mockPi.appendEntry;
+	mockPi.appendEntry = (customType, data) => { originalAppend(customType, data); appendToBranch(customType, data); };
+
+	const before = sentUserMessages.length;
+	for (const h of handlers.get("turn_end") ?? []) {
+		await h({ message: { role: "assistant", usage: { input: 90, output: 30 } } }, ctx);
+	}
+	ok("turn_end flips status to budget_limited",
+		branch.some((e) => e.customType === "goal/status" && e.data.status === "budget_limited"),
+		JSON.stringify(branch.filter((e) => e.type === "custom")));
+
+	for (const h of handlers.get("agent_end") ?? []) {
+		await h({ messages: [{ role: "assistant", stopReason: "stop" }] }, ctx);
+	}
+	// The wrap-up is scheduled through the guarded path, so let the timer run.
+	await new Promise((r) => setTimeout(r, 2200));
+	const wrapUp = sentUserMessages.slice(before).find((m) => String(m).includes("reached its token budget"));
+	ok("budget wrap-up prompt delivered", !!wrapUp, JSON.stringify(sentUserMessages.slice(before)).slice(0, 200));
+	mockPi.appendEntry = originalAppend;
+}
+
 console.log(`\n=== summary: ${pass} passed, ${fail} failed ===`);
 process.exit(fail === 0 ? 0 : 1);

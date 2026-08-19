@@ -20,7 +20,7 @@ patches to pi itself.
 | Goal extension runtime/tool (`codex-rs/ext/goal/src/*`) | `pi.registerTool({ name: "update_goal", … })` + slash command/runtime hooks |
 | Prompt templates (`codex-rs/prompts/templates/goals/*.md` and `codex-rs/ext/goal/templates/goals/*.md`) | Inlined TypeScript prompt builders |
 | Per-turn token accounting                             | `pi.on("turn_end")` reads `event.message.usage.{input,output}`     |
-| Auto-continuation after the agent loop fully settles  | `pi.on("agent_end")` + guarded `setTimeout` + compaction/busy polling + `pi.sendUserMessage(..., { deliverAs: "followUp" })` |
+| Auto-continuation after the agent loop fully settles  | `pi.on("agent_settled")` (fallback: `agent_end`) + guarded `setTimeout` + compaction/busy polling + `pi.sendUserMessage(..., { deliverAs: "followUp" })` + delivery verification |
 | Budget-limited steering                               | Once `tokensUsed ≥ tokenBudget`, status flips, wrap-up prompt sent |
 | Footer status (`/status`-style)                       | `ctx.ui.setStatus("goal", …)`                                      |
 | Resume across sessions                                | `pi.on("session_start" / "session_tree")` reconstructs from branch entries |
@@ -85,8 +85,41 @@ when:
 - **Post-run compaction guard** — `session_before_compact` pauses pending
   continuations until shortly after `session_compact`, avoiding races with Pi
   core's post-agent `continue()` path.
+- **Compaction-intent guard** — pi's `AgentSession.prompt()` refuses every
+  prompt (`"Cannot submit a prompt while compaction is in progress"`) from the
+  moment `ctx.compact()` runs, which is *before* `session_before_compact` is
+  emitted — an `abort()` await, an auth await and a whole-branch
+  `prepareCompaction()` sit in between. Extensions that start compactions
+  (`large-context-autocompact`) publish their intent on a process-global
+  counter that goal-mode honors, closing that unannounced window.
+- **Delivery verification** — `pi.sendUserMessage` is fire-and-forget: the
+  runtime swallows the rejection into an `Extension "<runtime>" error` toast,
+  so a refused continuation used to end the goal loop silently (symptom: after
+  a compaction the goal "just stops" until the user runs `/goal pause` then
+  `/goal resume`). Every fired continuation is now checked a few seconds later
+  — if no user message landed on the branch and pi is idle, it is re-armed.
+  After `PI_GOAL_DELIVERY_WINDOW_MS` (20 min) of failed hand-offs the goal
+  pauses with a warning instead of spinning forever.
+- **Anchored on `agent_settled`** — pi only emits it once no automatic retry,
+  compaction, or queued continuation remains. `agent_end` stays wired as a
+  fallback for older pi builds and stands down after the first `agent_settled`.
 - **Hard cap** — 200 auto-continuations per session as a defense-in-depth
-  ceiling.
+  ceiling. Refused sends don't consume it.
+
+## Timing knobs
+
+All are env-overridable at process start (used by the test-suite to run the
+state machine in milliseconds):
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `PI_GOAL_CONTINUE_DELAY_MS` | `1500` | Idle delay before a continuation fires |
+| `PI_GOAL_BUSY_RETRY_MS` | `1500` | Re-poll interval while pi is busy/compacting |
+| `PI_GOAL_INPUT_GRACE_MS` | `1000` | Quiet period required after user input |
+| `PI_GOAL_VERIFY_MS` | `4000` | Delay before checking a fired continuation landed |
+| `PI_GOAL_DELIVERY_WINDOW_MS` | `1200000` | Give up re-delivering after this long |
+| `PI_GOAL_COMPACTION_SETTLE_MS` | `1500` | Hold after `session_compact` |
+| `PI_GOAL_COMPACTION_WATCHDOG_MS` | `600000` | Failsafe release of the compaction guard |
 
 ## Installation
 

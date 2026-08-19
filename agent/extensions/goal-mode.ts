@@ -96,29 +96,79 @@ interface GoalView {
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
+function envInt(name: string, fallback: number): number {
+	const raw = process.env[name];
+	if (!raw) return fallback;
+	const v = Number.parseInt(raw, 10);
+	return Number.isFinite(v) && v > 0 ? v : fallback;
+}
+
 const MAX_OBJECTIVE_CHARS = 4_000;
-const AUTO_CONTINUE_IDLE_DELAY_MS = 1500;
+const AUTO_CONTINUE_IDLE_DELAY_MS = envInt("PI_GOAL_CONTINUE_DELAY_MS", 1500);
 /** Required ms with no user input before auto-continue may fire. */
-const USER_INPUT_GRACE_MS = 1000;
+const USER_INPUT_GRACE_MS = envInt("PI_GOAL_INPUT_GRACE_MS", 1000);
 /** How often to poll again when the agent is between runs but Pi is still doing post-run work. */
-const AUTO_CONTINUE_BUSY_RETRY_MS = 1500;
+const AUTO_CONTINUE_BUSY_RETRY_MS = envInt("PI_GOAL_BUSY_RETRY_MS", 1500);
 /**
  * After `session_compact`, Pi core may still synchronously decide to call
  * `agent.continue()` for an overflow retry / queued message. Keep goal
  * continuation held briefly so it cannot win that race and leave core trying
  * to continue from our newly-created assistant leaf.
  */
-const AUTO_CONTINUE_COMPACTION_SETTLE_MS = 1500;
+const AUTO_CONTINUE_COMPACTION_SETTLE_MS = envInt("PI_GOAL_COMPACTION_SETTLE_MS", 1500);
 /**
  * Auto-compaction runs after `agent_end` but before the prompt promise that
  * caused that run fully settles. A goal continuation started during that
  * post-run compaction can overlap Pi's own follow-up `agent.continue()` call
  * and surface as: Extension "<runtime>" error: Agent is already processing.
  */
-const AUTO_CONTINUE_COMPACTION_WATCHDOG_MS = 10 * 60 * 1000;
+const AUTO_CONTINUE_COMPACTION_WATCHDOG_MS = envInt("PI_GOAL_COMPACTION_WATCHDOG_MS", 10 * 60 * 1000);
+/**
+ * How long after firing a continuation we check that Pi actually accepted it.
+ *
+ * `pi.sendUserMessage` is fire-and-forget: the runtime swallows the rejection
+ * into an `Extension "<runtime>" error` toast, so a refused prompt gives the
+ * extension no callback, no throw, and no retry. Pi refuses prompts outright
+ * while a compaction is in progress (`AgentSession.prompt()` →
+ * "Cannot submit a prompt while compaction is in progress"), and that window
+ * opens *before* `session_before_compact` is emitted. Without an explicit
+ * delivery check, one refused continuation silently ends the goal until the
+ * user types /goal pause + /goal resume.
+ */
+const AUTO_CONTINUE_VERIFY_MS = envInt("PI_GOAL_VERIFY_MS", 4000);
+/** Give up re-delivering a continuation after this much wall-clock time. */
+const AUTO_CONTINUE_DELIVERY_WINDOW_MS = envInt("PI_GOAL_DELIVERY_WINDOW_MS", 20 * 60 * 1000);
 /** Cap on auto-continues per agent-end to avoid worst-case loops (safety net). */
 const AUTO_CONTINUE_HARD_LIMIT_PER_SESSION = 200;
 const STATUS_KEY = "goal";
+
+// ─── Cross-extension compaction intent ──────────────────────────────────────
+
+/**
+ * Pi's `AgentSession.prompt()` rejects every prompt from the moment
+ * `ctx.compact()` installs its abort controller — which happens *before* the
+ * `session_before_compact` extension event is emitted (an `abort()` await, an
+ * auth resolution await, and a full-branch `prepareCompaction()` pass sit in
+ * between). On a large session that pre-event window easily outlasts goal-mode's
+ * post-turn delay, so `session_before_compact` alone cannot guard the race.
+ *
+ * Any extension that starts a compaction publishes its intent through this
+ * process-global counter (`large-context-autocompact` does), letting goal-mode
+ * hold continuations across the whole compaction — including the setup window.
+ */
+interface CompactionIntentRegistry {
+	count: number;
+}
+
+function compactionIntentRegistry(): CompactionIntentRegistry {
+	const g = globalThis as { __piCompactionIntent?: CompactionIntentRegistry };
+	if (!g.__piCompactionIntent) g.__piCompactionIntent = { count: 0 };
+	return g.__piCompactionIntent;
+}
+
+function compactionIntentActive(): boolean {
+	return compactionIntentRegistry().count > 0;
+}
 
 /**
  * Continuation prompt — adapted from codex-rs/prompts/templates/goals/continuation.md
@@ -327,6 +377,19 @@ function reconstructGoal(ctx: ExtensionContext): GoalView | undefined {
 	};
 }
 
+/**
+ * Number of user messages on the branch. Used as the delivery receipt for an
+ * auto-continuation: pi appends the prompt as a user entry the moment it
+ * accepts it, so an unchanged count means the send was refused/dropped.
+ */
+function countUserMessages(ctx: ExtensionContext): number {
+	let n = 0;
+	for (const entry of ctx.sessionManager.getBranch()) {
+		if (entry.type === "message" && entry.message.role === "user") n += 1;
+	}
+	return n;
+}
+
 function statusEmoji(status: GoalStatus): string {
 	switch (status) {
 		case "active":
@@ -465,11 +528,20 @@ export default function (pi: ExtensionAPI) {
 	let compactionSettleTimer: NodeJS.Timeout | undefined;
 	let compactionWatchdogTimer: NodeJS.Timeout | undefined;
 
-	const refresh = (ctx: ExtensionContext) => {
+	/**
+	 * Re-derive the branch-local goal view.
+	 *
+	 * `syncBudgetFlag` is only set when the branch identity itself changed
+	 * (session start / branch switch): there the sticky "already wrapped up"
+	 * state has to be restored from the persisted status. On ordinary refreshes
+	 * it must NOT be touched — `turn_end` appends the `budget_limited` status and
+	 * refreshes immediately, so syncing here would mark the wrap-up as sent
+	 * before `agent_end` ever got the chance to deliver it (the budget-limit
+	 * prompt was unreachable for exactly this reason).
+	 */
+	const refresh = (ctx: ExtensionContext, opts: { syncBudgetFlag?: boolean } = {}) => {
 		goal = reconstructGoal(ctx);
-		// On a fresh reconstruction, decide if we've already wrapped up.
-		// (Restored sessions / branches need to keep the sticky state.)
-		budgetWrapUpSent = goal?.status === "budget_limited";
+		if (opts.syncBudgetFlag) budgetWrapUpSent = goal?.status === "budget_limited";
 		if (ctx.hasUI) {
 			ctx.ui.setStatus(STATUS_KEY, renderFooter(goal));
 		}
@@ -479,14 +551,14 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		autoContinueCount = 0;
-		refresh(ctx);
+		refresh(ctx, { syncBudgetFlag: true });
 	});
 
 	pi.on("session_tree", async (_event, ctx) => {
 		// Branch switch → goal might be entirely different now.
 		autoContinueGeneration += 1;
 		autoContinueCount = 0;
-		refresh(ctx);
+		refresh(ctx, { syncBudgetFlag: true });
 	});
 
 	pi.on("session_before_compact", async () => {
@@ -545,10 +617,45 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
+	/**
+	 * `agent_settled` fires only after the run has *fully* settled — no automatic
+	 * retry, core auto-compaction, or queued continuation is still pending — so
+	 * it is a far safer anchor for auto-continuation than `agent_end`, which
+	 * fires while Pi may still run post-run work. Older pi builds don't emit it;
+	 * `agent_end` stays wired as the fallback and stands down as soon as one
+	 * `agent_settled` has been observed.
+	 */
+	let sawAgentSettled = false;
+	let lastAgentEnd: { messages: { role: string; stopReason?: string }[] } | undefined;
+
+	pi.on("agent_settled", async (_event, ctx) => {
+		sawAgentSettled = true;
+		const pending = lastAgentEnd;
+		lastAgentEnd = undefined;
+		// Error accounting already happened in agent_end (the only hook carrying
+		// the run's messages, and it fires exactly once per run) — counting again
+		// here would auto-pause the goal after a single failed response.
+		await handleRunFinished(pending?.messages ?? [], ctx, { accountErrors: false });
+	});
+
 	pi.on("agent_end", async (event, ctx) => {
+		lastAgentEnd = { messages: event.messages };
+		// Once pi has proven it emits agent_settled, that is the anchor: it is the
+		// only signal that no retry/compaction/queued continuation is still coming.
+		await handleRunFinished(event.messages, ctx, { schedule: !sawAgentSettled });
+	});
+
+	async function handleRunFinished(
+		messages: { role: string; stopReason?: string }[],
+		ctx: ExtensionContext,
+		opts: { accountErrors?: boolean; schedule?: boolean } = {},
+	) {
+		const accountErrors = opts.accountErrors ?? true;
+		const schedule = opts.schedule ?? true;
+		const event = { messages };
 		// Refresh view first — the just-finished loop may have called update_goal,
-		// hit the budget, etc. (turn_end refreshes too but agent_end is the only
-		// event guaranteed to fire AFTER all turn_ends.)
+		// hit the budget, etc. (turn_end refreshes too but this is the only
+		// hook guaranteed to fire AFTER all turn_ends.)
 		refresh(ctx);
 		if (!goal) return;
 
@@ -559,7 +666,7 @@ export default function (pi: ExtensionAPI) {
 			.reverse()
 			.find((m) => m.role === "assistant");
 		const stop = finalAssistant?.stopReason;
-		const erroredOrAborted = stop === "error" || stop === "aborted";
+		const erroredOrAborted = accountErrors && (stop === "error" || stop === "aborted");
 		if (erroredOrAborted) {
 			consecutiveErrorEnds += 1;
 			if (
@@ -581,10 +688,11 @@ export default function (pi: ExtensionAPI) {
 			}
 			// Below the threshold: fall through and let the normal continuation
 			// scheduling try once more (transient-blip recovery).
-		} else {
+		} else if (accountErrors) {
 			consecutiveErrorEnds = 0;
 		}
 
+		if (!schedule) return; // agent_settled will schedule once the run truly settles
 		if (!ctx.hasUI) return; // Print/RPC mode: never auto-continue.
 
 		if (isPlanModeActive(ctx) && (goal.status === "active" || goal.status === "budget_limited")) {
@@ -610,7 +718,7 @@ export default function (pi: ExtensionAPI) {
 		if (goal.status === "active") {
 			scheduleContinuation(CONTINUATION_PROMPT(goal), pi, ctx);
 		}
-	});
+	}
 
 	/**
 	 * Tracked timer handles so session_shutdown can cancel any pending
@@ -627,14 +735,26 @@ export default function (pi: ExtensionAPI) {
 	) {
 		const myGen = ++autoContinueGeneration;
 		if (autoContinueCount >= AUTO_CONTINUE_HARD_LIMIT_PER_SESSION) {
-			ctx.ui.notify(
-				`goal: auto-continue hard-limit (${AUTO_CONTINUE_HARD_LIMIT_PER_SESSION}) hit — pausing`,
-				"warning",
-			);
+			if (ctx.hasUI) {
+				ctx.ui.notify(
+					`goal: auto-continue hard-limit (${AUTO_CONTINUE_HARD_LIMIT_PER_SESSION}) hit — pausing`,
+					"warning",
+				);
+			}
 			appendStatus(pi, "paused", { summary: "auto: hard-limit reached" });
 			return;
 		}
-		armContinuationTimer(prompt, pi, ctx, myGen, AUTO_CONTINUE_IDLE_DELAY_MS);
+		armContinuationTimer(prompt, pi, ctx, myGen, AUTO_CONTINUE_IDLE_DELAY_MS, Date.now());
+	}
+
+	/** True while anything makes a new prompt unsafe/impossible to submit. */
+	function continuationBlocked(ctx: ExtensionContext): boolean {
+		return (
+			postAgentCompactionInFlight ||
+			compactionIntentActive() ||
+			!ctx.isIdle() ||
+			ctx.hasPendingMessages()
+		);
 	}
 
 	function armContinuationTimer(
@@ -643,23 +763,25 @@ export default function (pi: ExtensionAPI) {
 		ctx: ExtensionContext,
 		generation: number,
 		delayMs: number,
+		startedAt: number,
 	) {
 		const timer: NodeJS.Timeout = setTimeout(() => {
 			pendingTimers.delete(timer);
 			if (generation !== autoContinueGeneration) return; // preempted by user input or branch switch
 
-			if (postAgentCompactionInFlight || !ctx.isIdle() || ctx.hasPendingMessages()) {
-				armContinuationTimer(prompt, pi, ctx, generation, AUTO_CONTINUE_BUSY_RETRY_MS);
+			if (continuationBlocked(ctx)) {
+				retryDelivery(prompt, pi, ctx, generation, startedAt, AUTO_CONTINUE_BUSY_RETRY_MS);
 				return;
 			}
 
 			const msSinceUserInput = Date.now() - lastUserInputAt;
 			if (msSinceUserInput < USER_INPUT_GRACE_MS) {
-				armContinuationTimer(
+				retryDelivery(
 					prompt,
 					pi,
 					ctx,
 					generation,
+					startedAt,
 					Math.max(USER_INPUT_GRACE_MS - msSinceUserInput, AUTO_CONTINUE_BUSY_RETRY_MS),
 				);
 				return;
@@ -671,11 +793,81 @@ export default function (pi: ExtensionAPI) {
 			if (!live) return;
 			if (live.status !== "active" && live.status !== "budget_limited") return;
 			autoContinueCount += 1;
+			const userMessagesBefore = countUserMessages(ctx);
 			pi.sendUserMessage(prompt, { deliverAs: "followUp" });
+			armDeliveryCheck(prompt, pi, ctx, generation, startedAt, userMessagesBefore);
 		}, delayMs);
 		pendingTimers.add(timer);
 		// Allow node to exit even when the timer is pending (defensive — pi's
 		// runtime keeps the process alive on its own).
+		if (typeof timer.unref === "function") timer.unref();
+	}
+
+	/**
+	 * Re-arm, unless we've been trying to hand off this continuation for longer
+	 * than the delivery window (in which case something is structurally wrong and
+	 * silently spinning forever would be worse than pausing with a message).
+	 */
+	function retryDelivery(
+		prompt: string,
+		pi: ExtensionAPI,
+		ctx: ExtensionContext,
+		generation: number,
+		startedAt: number,
+		delayMs: number,
+	) {
+		if (Date.now() - startedAt > AUTO_CONTINUE_DELIVERY_WINDOW_MS) {
+			if (ctx.hasUI) {
+				ctx.ui.notify(
+					"Goal auto-continuation could not be delivered (pi stayed busy/compacting). Pausing — /goal resume to retry.",
+					"warning",
+				);
+			}
+			appendStatus(pi, "paused", { summary: "auto: continuation could not be delivered" });
+			refresh(ctx);
+			return;
+		}
+		armContinuationTimer(prompt, pi, ctx, generation, delayMs, startedAt);
+	}
+
+	/**
+	 * Delivery receipt for a fired continuation.
+	 *
+	 * `pi.sendUserMessage` is fire-and-forget — the runtime catches the rejection
+	 * and turns it into an `Extension "<runtime>" error` toast, so the extension
+	 * never learns that the prompt bounced. The most common bounce is
+	 * "Cannot submit a prompt while compaction is in progress", which pi raises
+	 * from the instant `ctx.compact()` runs — i.e. before `session_before_compact`
+	 * arms our compaction guard. Historically that single dropped prompt ended
+	 * the goal loop until the user manually ran /goal pause + /goal resume.
+	 *
+	 * So: verify. If no user message landed on the branch and pi is idle again,
+	 * the prompt never made it — re-arm instead of going quiet.
+	 */
+	function armDeliveryCheck(
+		prompt: string,
+		pi: ExtensionAPI,
+		ctx: ExtensionContext,
+		generation: number,
+		startedAt: number,
+		userMessagesBefore: number,
+	) {
+		const timer: NodeJS.Timeout = setTimeout(() => {
+			pendingTimers.delete(timer);
+			if (generation !== autoContinueGeneration) return;
+			if (countUserMessages(ctx) > userMessagesBefore) return; // delivered
+			if (!ctx.isIdle() || ctx.hasPendingMessages()) return; // accepted, just not visible yet
+
+			const live = reconstructGoal(ctx);
+			if (!live) return;
+			if (live.status !== "active" && live.status !== "budget_limited") return;
+
+			// The send was refused. Don't let the failed attempt consume the
+			// session-wide auto-continue budget, and try again.
+			autoContinueCount = Math.max(0, autoContinueCount - 1);
+			retryDelivery(prompt, pi, ctx, generation, startedAt, AUTO_CONTINUE_BUSY_RETRY_MS);
+		}, AUTO_CONTINUE_VERIFY_MS);
+		pendingTimers.add(timer);
 		if (typeof timer.unref === "function") timer.unref();
 	}
 
@@ -949,6 +1141,21 @@ export default function (pi: ExtensionAPI) {
 				.map((s) => ({ value: s.value, label: s.value, description: s.description }));
 		},
 	});
+
+	// Internal handles for unit tests (loaded via dynamic import).
+	(pi as unknown as { __goalModeInternals?: unknown }).__goalModeInternals = {
+		reconstructGoal,
+		countUserMessages,
+		compactionIntentActive,
+		constants: {
+			AUTO_CONTINUE_IDLE_DELAY_MS,
+			AUTO_CONTINUE_BUSY_RETRY_MS,
+			AUTO_CONTINUE_VERIFY_MS,
+			AUTO_CONTINUE_COMPACTION_SETTLE_MS,
+			USER_INPUT_GRACE_MS,
+		},
+		state: () => ({ autoContinueCount, budgetWrapUpSent, sawAgentSettled }),
+	};
 }
 
 // ─── Append helpers ─────────────────────────────────────────────────────────
