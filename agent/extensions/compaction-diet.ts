@@ -27,7 +27,7 @@ import type {
 	ExtensionCommandContext,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { convertToLlm, estimateTokens, generateSummary, serializeConversation } from "@earendil-works/pi-coding-agent";
+import { estimateTokens, generateSummary } from "@earendil-works/pi-coding-agent";
 
 // ─── config (env-overridable; runtime-tweakable via /compaction-diet) ──────
 
@@ -255,6 +255,23 @@ interface ResolvedModel {
 	headers: Record<string, string> | undefined;
 }
 
+/**
+ * `modelRegistry.getApiKeyAndHeaders()` returns `ProviderHeaders`
+ * (`Record<string, string | null>`, where `null` means "drop this header"),
+ * while `generateSummary()` still takes `Record<string, string>`. Resolve the
+ * mismatch the way the provider layer does: drop the nulled entries.
+ */
+function plainHeaders(
+	headers: Record<string, string | null> | undefined,
+): Record<string, string> | undefined {
+	if (!headers) return undefined;
+	const out: Record<string, string> = {};
+	for (const [k, v] of Object.entries(headers)) {
+		if (typeof v === "string") out[k] = v;
+	}
+	return out;
+}
+
 // ─── extension entrypoint ──────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
@@ -290,7 +307,7 @@ export default function (pi: ExtensionAPI) {
 					note(ctx, `compaction-diet: model "${cfg.modelRef}" not found — using session model.`, "warning");
 				} else {
 					const auth = await ctx.modelRegistry.getApiKeyAndHeaders(m);
-					if (auth.ok) return { model: m, apiKey: auth.apiKey, headers: auth.headers };
+					if (auth.ok) return { model: m, apiKey: auth.apiKey, headers: plainHeaders(auth.headers) };
 					note(ctx, `compaction-diet: no auth for "${cfg.modelRef}" (${auth.error}) — using session model.`, "warning");
 				}
 			}
@@ -299,7 +316,7 @@ export default function (pi: ExtensionAPI) {
 		if (!m) return null;
 		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(m);
 		if (!auth.ok) return null;
-		return { model: m, apiKey: auth.apiKey, headers: auth.headers };
+		return { model: m, apiKey: auth.apiKey, headers: plainHeaders(auth.headers) };
 	}
 
 	pi.on("session_start", async (_event, ctx) => refreshFooter(ctx));
@@ -504,8 +521,7 @@ export default function (pi: ExtensionAPI) {
 		parseModelRef,
 		tokensOf,
 		byteLen,
-		serializeConversation,
-		convertToLlm,
+		plainHeaders,
 		cfg,
 		stats,
 	};
