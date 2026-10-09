@@ -172,11 +172,6 @@ def s_plan_mode() -> ExtensionTest:
 
 
 def s_memories() -> ExtensionTest:
-    def setup(_cwd: str) -> None:
-        mp = Path.home() / ".pi" / "memories" / "MEMORY.md"
-        if mp.exists():
-            mp.unlink()
-
     return ExtensionTest(
         name="memories",
         scenarios=[
@@ -196,7 +191,6 @@ def s_memories() -> ExtensionTest:
             Scenario("wipe alias noop", "/memories wipe", expect_notify_contains="already absent"),
             Scenario("rm alias noop", "/memories rm", expect_notify_contains="already absent"),
         ],
-        setup=setup,
     )
 
 
@@ -436,6 +430,9 @@ def run_extension_test(test: ExtensionTest) -> tuple[bool, List[str], int]:
             **clean_environ,
             "PI_NO_SPOOF": "1",
             "PI_OFFLINE": "1",
+            # Memory scenarios include clear/wipe/rm; never touch the user's
+            # persistent registry, even when PI_MEMORIES_DIR is already set.
+            "PI_MEMORIES_DIR": f"{cwd}/memories",
         }
 
         proc = subprocess.Popen(
