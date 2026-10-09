@@ -52,6 +52,7 @@ case "$mode" in
     run_step "terminal-title"         $JS_RUNTIME tests/test-terminal-title.mjs
     run_step "context-tools"          $JS_RUNTIME tests/test-context-tools.mjs
     run_step "current-time"           $JS_RUNTIME tests/test-current-time.mjs
+    run_step "introspection"          $JS_RUNTIME tests/test-introspection.mjs
     run_step "rollout-budget"         $JS_RUNTIME tests/test-rollout-budget.mjs
     run_step "rollout trace"          $JS_RUNTIME tests/test-rollout-trace.mjs
     run_step "subagents mode"         $JS_RUNTIME tests/test-subagents-mode.mjs
@@ -81,6 +82,7 @@ case "$mode" in
     run_step "terminal-title"         $JS_RUNTIME tests/test-terminal-title.mjs
     run_step "context-tools"          $JS_RUNTIME tests/test-context-tools.mjs
     run_step "current-time"           $JS_RUNTIME tests/test-current-time.mjs
+    run_step "introspection"          $JS_RUNTIME tests/test-introspection.mjs
     run_step "rollout-budget"         $JS_RUNTIME tests/test-rollout-budget.mjs
     run_step "rollout trace"          $JS_RUNTIME tests/test-rollout-trace.mjs
     run_step "subagents mode"         $JS_RUNTIME tests/test-subagents-mode.mjs

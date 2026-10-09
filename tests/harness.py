@@ -224,8 +224,7 @@ def s_introspection() -> ExtensionTest:
             Scenario("hooks reset", "/hooks reset", expect_notify_contains="reset"),
             Scenario("tools no filter", "/tools", expect_notify_contains="Tools"),
             Scenario("tools filter", "/tools subagent", expect_notify_contains="subagent"),
-            Scenario("mcp alias", "/mcp", expect_notify_contains="Tools"),
-            Scenario("mcp filter", "/mcp memory", expect_notify_contains="memory"),
+            Scenario("tools memory filter", "/tools memory", expect_notify_contains="memory"),
             Scenario("debug-config", "/debug-config", expect_notify_contains="runtime"),
         ],
     )

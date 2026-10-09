@@ -272,10 +272,10 @@ Grab-bag for codex introspection slash commands. Currently:
   `pi.on(event, handler)` rather than TOML declarations), so this port surfaces
   live activity instead — useful when debugging extensions or learning what's
   fireable from a handler.
-- `/tools` / `/mcp` — enumerate every registered tool grouped by source
-  extension, with `●` active / `○` inactive markers and an optional substring
-  filter. `/mcp` is an alias because pi treats MCP-sourced tools the same as
-  any other extension tool (ports `codex-rs/tui/src/chatwidget.rs add_mcp_output`).
+- `/tools` — enumerate every registered tool grouped by source extension,
+  with `●` active / `○` inactive markers and an optional substring filter
+  (ports `codex-rs/tui/src/chatwidget.rs add_mcp_output`). `/mcp` is reserved
+  for pi's built-in MCP extension so it can load without a command conflict.
 - `/debug-config` — dump runtime state (model, thinking level, cwd, session
   id+file), settings layers (global + project) with their top-level keys,
   every loaded extension and its slash commands, and pi/codex-related env

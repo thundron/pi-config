@@ -1,10 +1,10 @@
 /**
  * introspection — pi extension that ports codex's introspection slash
- * commands (`/hooks`, `/mcp`, `/debug-config`) as a single grab-bag.
+ * commands (`/hooks`, `/tools`, `/debug-config`) as a single grab-bag.
  *
  * Currently exposes:
  *   /hooks         — list lifecycle events + per-event fire counts
- *   /tools (/mcp)  — list registered tools grouped by source extension
+ *   /tools         — list registered tools grouped by source extension
  *   /debug-config  — dump active config: settings, model, thinking, cwd, sources
  *
  * Port plan tracker: ~/dev/pi-config/PORT-PLAN.md
@@ -236,7 +236,7 @@ export default function (pi: ExtensionAPI) {
 	};
 	for (const h of HOOKS) onAny(h.event);
 
-	// ─── /tools (alias /mcp) ─ codex-rs/tui/src/chatwidget.rs add_mcp_output ─────
+	// ─── /tools ─ codex-rs/tui/src/chatwidget.rs add_mcp_output ─────────────────
 
 	const toolsHandler = async (rawArgs: string, ctx: ExtensionCommandContext) => {
 		let tools: Array<{
@@ -307,13 +307,8 @@ export default function (pi: ExtensionAPI) {
 		handler: toolsHandler,
 	});
 
-	// /mcp — codex's name. In codex this filters to MCP-server tools; in pi every
-	// tool registers via the same pi.registerTool() API, so /mcp aliases /tools.
-	pi.registerCommand("mcp", {
-		description:
-			"Alias for /tools (codex port; pi doesn't distinguish MCP tools from other extension tools).",
-		handler: toolsHandler,
-	});
+	// Leave /mcp to pi's built-in MCP extension; claiming it here prevents
+	// that extension from loading.
 
 	// ─── /debug-config ─ codex-rs/tui/src/chatwidget.rs add_debug_config_output ─
 
