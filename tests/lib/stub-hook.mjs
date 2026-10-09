@@ -50,16 +50,15 @@ const STUB_SOURCE = [
 	"});",
 	"const stub = makeStub();",
 	"export default stub;",
-	// Mirrors pi's own chars/4 heuristic so token-budget math stays meaningful
-	// in unit tests (a constant 0 makes every budget assertion vacuous).
+	// Mirror pi's chars/4 heuristic so token-budget assertions stay meaningful.
 	"export const estimateTokens = (m) => {",
 	"  const c = m && m.content;",
 	"  const text = typeof c === 'string' ? c : Array.isArray(c) ? c.map((b) => (b && b.type === 'text' && typeof b.text === 'string' ? b.text : '')).join('') : '';",
 	"  return Math.ceil(text.length / 4);",
 	"};",
-	// compaction-diet: bounded summarization helpers.
-	"export const generateSummary = async () => 'stub summary';",
-	"export const serializeConversation = () => '';",
+	// Unified compaction: bounded summarization helpers.
+	"export const generateSummary = async () => 'STUB SUMMARY';",
+	"export const serializeConversation = (messages) => JSON.stringify(messages);",
 	"export const convertToLlm = (messages) => messages;",
 	// Real impl: returns true iff event.toolName === toolName. Mirror that so
 	// extensions that key behaviour on isToolCallEventType (e.g. guardian.ts's

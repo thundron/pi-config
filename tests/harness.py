@@ -230,6 +230,29 @@ def s_introspection() -> ExtensionTest:
     )
 
 
+def s_compaction() -> ExtensionTest:
+    return ExtensionTest(
+        name="compaction",
+        scenarios=[
+            Scenario("show", "/compaction", expect_notify_contains="enabled:"),
+            Scenario("off", "/compaction off", expect_notify_contains="compaction OFF"),
+            Scenario("on", "/compaction on", expect_notify_contains="compaction ON"),
+            Scenario("trigger off", "/compaction trigger off", expect_notify_contains="trigger = off"),
+            Scenario("trigger on", "/compaction trigger on", expect_notify_contains="trigger = on"),
+            Scenario("diet off", "/compaction diet off", expect_notify_contains="diet = off"),
+            Scenario("diet on", "/compaction diet on", expect_notify_contains="diet = on"),
+            Scenario("fraction", "/compaction fraction 0.75", expect_notify_contains="fraction = 0.75"),
+            Scenario("invalid fraction", "/compaction fraction 1", expect_notify_contains="Usage", expect_notify_type="warning"),
+            Scenario("mode", "/compaction mode tear-out", expect_notify_contains="mode = tear-out"),
+            Scenario("max", "/compaction max 8192", expect_notify_contains="max result bytes = 8192"),
+            Scenario("model", "/compaction model google/gemini-2.5-pro", expect_notify_contains="summary model = google/gemini-2.5-pro"),
+            Scenario("model clear", "/compaction model clear", expect_notify_contains="summary model = (session model)"),
+            Scenario("thinking", "/compaction thinking off", expect_notify_contains="thinking = off"),
+            Scenario("unknown", "/compaction bogus", expect_notify_contains="Unknown subcommand", expect_notify_type="warning"),
+        ],
+    )
+
+
 def s_background_procs() -> ExtensionTest:
     return ExtensionTest(
         name="background-procs",
@@ -374,6 +397,7 @@ ALL: dict[str, ExtensionTest] = {
     "terminal-title": s_terminal_title(),
     "pets": s_pets(),
     "context-diet": s_context_diet(),
+    "compaction": s_compaction(),
     "guardian": s_guardian(),
 }
 

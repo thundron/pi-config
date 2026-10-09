@@ -66,6 +66,8 @@ useful only once `pi-fleet` itself is installed.
 | `~/.pi/agent/extensions/subagents.ts`                | → | `agent/extensions/subagents.ts`          |
 | `~/.pi/agent/extensions/subagents.README.md`         | → | `agent/extensions/subagents.README.md`   |
 | `~/.pi/agent/extensions/codex-cli-extras.ts`         | → | `agent/extensions/codex-cli-extras.ts`   |
+| `~/.pi/agent/extensions/compaction.ts`               | → | `agent/extensions/compaction.ts`         |
+| `~/.pi/agent/extensions/compaction.README.md`        | → | `agent/extensions/compaction.README.md`  |
 | `~/.pi/agent/extensions/context-diet.ts`             | → | `agent/extensions/context-diet.ts`       |
 | `~/.pi/agent/extensions/context-diet.README.md`      | → | `agent/extensions/context-diet.README.md` |
 | `~/.pi/agent/skills/claude-code/SKILL.md`            | → | `agent/skills/claude-code/SKILL.md`      |
@@ -300,6 +302,17 @@ placeholders: `{cwd}`, `{fullcwd}`, `{model}`, `{thinking}`, `{provider}`,
 `{branch}`, `{session}`. Re-renders on every event that changes a value
 (`turn_end`, `model_select`, `thinking_level_select`). Persists across
 session resumes via `custom_message` entries on the branch.
+
+### `agent/extensions/compaction.ts` (+ README)
+
+Unified proactive compaction trigger and bounded summarizer, replacing
+`large-context-autocompact` and `compaction-diet`. For large-context models it
+compacts at 50% usage after a turn settles (with a pre-input fallback), then
+trims oversized tool results and summarizes in a single pass or chunked fold.
+`/compaction on|off` controls both halves; `/compaction trigger on|off` and
+`/compaction diet on|off` control them separately. Disabling the extension leaves
+pi's default compaction in place. See the extension README for configuration
+and migration notes.
 
 ### `agent/extensions/context-diet.ts` (+ README)
 

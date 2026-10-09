@@ -5,7 +5,7 @@
 // to run /goal pause + /goal resume to get it moving again.
 //
 // Mechanism (pi 0.84.x):
-//   1. `large-context-autocompact` starts a post-turn compaction via
+//   1. `compaction` starts a post-turn compaction via
 //      `ctx.compact()` shortly after `agent_end`.
 //   2. `AgentSession.compact()` installs `_compactionAbortController` BEFORE it
 //      emits `session_before_compact` (an `abort()` await, an auth await and a
@@ -61,7 +61,7 @@ if (!process.env.PI_GOAL_RACE_TEST_BOOTSTRAPPED) {
 }
 
 const EXT_PATH = resolve(__dirname, "..", "agent", "extensions", "goal-mode.ts");
-const AUTOCOMPACT_PATH = resolve(__dirname, "..", "agent", "extensions", "large-context-autocompact.ts");
+const AUTOCOMPACT_PATH = resolve(__dirname, "..", "agent", "extensions", "compaction.ts");
 
 let pass = 0, fail = 0;
 function ok(label, cond, hint = "") {
@@ -172,7 +172,7 @@ console.log("\n=== session_before_compact holds continuation ===");
 
 // ─── 4. cross-extension compaction intent guard ─────────────────────────────
 
-console.log("\n=== compaction intent published by large-context-autocompact ===");
+console.log("\n=== compaction intent published by the unified extension ===");
 {
 	const autocompact = await import(`${AUTOCOMPACT_PATH}?fresh=1`);
 	const captured = {};
@@ -183,8 +183,8 @@ console.log("\n=== compaction intent published by large-context-autocompact ==="
 		sendUserMessage: () => {},
 	};
 	autocompact.default(acPi);
-	const internals = acPi.__largeContextAutocompactInternals;
-	ok("autocompact exposes startCompaction", typeof internals?.startCompaction === "function");
+	const internals = acPi.__compactionInternals;
+	ok("compaction exposes startCompaction", typeof internals?.startCompaction === "function");
 
 	const s = makeSession();
 	goalMode.default(s.pi);
@@ -192,7 +192,7 @@ console.log("\n=== compaction intent published by large-context-autocompact ==="
 	ok("goal-mode exposes compactionIntentActive", typeof goalInternals?.compactionIntentActive === "function");
 	ok("intent starts clear", goalInternals.compactionIntentActive() === false);
 
-	// large-context-autocompact starts a compaction; capture pi's callbacks.
+	// compaction starts a compaction; capture pi's callbacks.
 	internals.startCompaction(
 		{ hasUI: false, compact: (opts) => { captured.opts = opts; }, ui: { notify: () => {} } },
 		"post-turn",

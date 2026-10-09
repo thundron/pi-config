@@ -64,16 +64,16 @@ assert(
 
 // The producer half of the compaction-intent contract.
 const autocompactSrc = readFileSync(
-	join(REPO_ROOT, "agent/extensions/large-context-autocompact.ts"),
+	join(REPO_ROOT, "agent/extensions/compaction.ts"),
 	"utf8",
 );
 assert(
 	/const releaseIntent = beginCompactionIntent\(\);[\s\S]{0,200}ctx\.compact\(/.test(autocompactSrc),
-	"large-context-autocompact must publish compaction intent BEFORE calling ctx.compact()",
+	"compaction must publish compaction intent BEFORE calling ctx.compact()",
 );
 assert(
 	(autocompactSrc.match(/releaseIntent\(\);/g) ?? []).length >= 2,
-	"large-context-autocompact must release compaction intent on both onComplete and onError",
+	"compaction must release compaction intent on both onComplete and onError",
 );
 
 console.log("test-goal-mode-runtime-race: OK");

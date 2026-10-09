@@ -90,7 +90,7 @@ when:
   moment `ctx.compact()` runs, which is *before* `session_before_compact` is
   emitted — an `abort()` await, an auth await and a whole-branch
   `prepareCompaction()` sit in between. Extensions that start compactions
-  (`large-context-autocompact`) publish their intent on a process-global
+  (`compaction`) publish their intent on a process-global
   counter that goal-mode honors, closing that unannounced window.
 - **Delivery verification** — `pi.sendUserMessage` is fire-and-forget: the
   runtime swallows the rejection into an `Extension "<runtime>" error` toast,

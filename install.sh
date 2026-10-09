@@ -101,6 +101,19 @@ link() {
   printf '  linked:   %s → %s\n' "$live" "$repo_file"
 }
 
+# Remove retired links owned by this checkout, including dangling symlinks.
+# Never delete a real file or a link managed by another checkout.
+unlink_retired() {
+  local live="$1"
+  local repo_rel="$2"
+  if [ -L "$live" ] && [ "$(canon "$live")" = "$(canon "$REPO_ROOT/$repo_rel")" ]; then
+    rm -f "$live"
+    printf '  retired:  %s\n' "$live"
+  elif [ -e "$live" ] || [ -L "$live" ]; then
+    printf '  WARNING: retired extension %s is not owned by this checkout; disable or remove it manually.\n' "$live" >&2
+  fi
+}
+
 # Strip pi-self-mutated fields (lastChangelogVersion) before drift compare.
 _settings_normalize() {
   grep -v '"lastChangelogVersion"' -- "$1" 2>/dev/null || true
@@ -175,12 +188,14 @@ link "$HOME/.pi/agent/extensions/context-tools.ts"        "agent/extensions/cont
 link "$HOME/.pi/agent/extensions/current-time.ts"         "agent/extensions/current-time.ts"
 link "$HOME/.pi/agent/extensions/rollout-budget.ts"       "agent/extensions/rollout-budget.ts"
 link "$HOME/.pi/agent/extensions/rollout-budget.README.md" "agent/extensions/rollout-budget.README.md"
-link "$HOME/.pi/agent/extensions/large-context-autocompact.ts" "agent/extensions/large-context-autocompact.ts"
-link "$HOME/.pi/agent/extensions/large-context-autocompact.README.md" "agent/extensions/large-context-autocompact.README.md"
+for retired in compaction-diet large-context-autocompact; do
+  unlink_retired "$HOME/.pi/agent/extensions/$retired.ts" "agent/extensions/$retired.ts"
+  unlink_retired "$HOME/.pi/agent/extensions/$retired.README.md" "agent/extensions/$retired.README.md"
+done
+link "$HOME/.pi/agent/extensions/compaction.ts"           "agent/extensions/compaction.ts"
+link "$HOME/.pi/agent/extensions/compaction.README.md"    "agent/extensions/compaction.README.md"
 link "$HOME/.pi/agent/extensions/context-diet.ts"         "agent/extensions/context-diet.ts"
 link "$HOME/.pi/agent/extensions/context-diet.README.md"  "agent/extensions/context-diet.README.md"
-link "$HOME/.pi/agent/extensions/compaction-diet.ts"      "agent/extensions/compaction-diet.ts"
-link "$HOME/.pi/agent/extensions/compaction-diet.README.md" "agent/extensions/compaction-diet.README.md"
 link "$HOME/.pi/agent/extensions/tool-pairing-guard.ts"   "agent/extensions/tool-pairing-guard.ts"
 link "$HOME/.pi/agent/extensions/tool-pairing-guard.README.md" "agent/extensions/tool-pairing-guard.README.md"
 link "$HOME/.pi/agent/skills/claude-code/SKILL.md"        "agent/skills/claude-code/SKILL.md"

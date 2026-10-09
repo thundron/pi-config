@@ -11,7 +11,7 @@ must have a corresponding `tool_use` block in the previous message.
 
 ## Why the error happens
 
-It is **not** caused by `context-diet` / `compaction-diet` — those preserve
+It is **not** caused by `context-diet` / `compaction` — those preserve
 message structure 1:1. It originates in pi-core's provider layer
 (`pi-ai/providers/transform-messages.js` → `anthropic.js`), which reshapes the
 on-disk history right before the API call:

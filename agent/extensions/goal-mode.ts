@@ -153,7 +153,7 @@ const STATUS_KEY = "goal";
  * post-turn delay, so `session_before_compact` alone cannot guard the race.
  *
  * Any extension that starts a compaction publishes its intent through this
- * process-global counter (`large-context-autocompact` does), letting goal-mode
+ * process-global counter (`compaction` does), letting goal-mode
  * hold continuations across the whole compaction — including the setup window.
  */
 interface CompactionIntentRegistry {
