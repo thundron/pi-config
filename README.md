@@ -87,13 +87,11 @@ on which side is canonical.
 
 ### `bin/pi`
 
-PATH-shadow wrapper. Forwards subcommands (`install`, `update`, `auth`,
-…) untouched, but for actual chat invocations injects
-`--system-prompt "$(cat ~/.pi/agent/system-prompt.txt)"` before
-exec-ing the real pi binary. The injection is what makes Anthropic's
-OAuth billing classifier treat the request as Claude Code rather than
-a third-party app on accounts that don't have overage credit
-configured.
+For chat, the wrapper loads `bin/anthropic-prompt.ts`. It uses the existing
+`~/.pi/agent/system-prompt.txt` only when Pi's active provider is exactly
+`anthropic`. The check runs each turn, including after `/model` switches.
+Other providers (including Claude via OpenRouter) keep their normal prompt.
+Subcommands such as `install`, `update`, and `auth` are forwarded untouched.
 
 Auto-detects the real `pi` binary by walking `$PATH` and skipping
 itself, so it's portable across `/home/linuxbrew/.linuxbrew/bin/pi`
@@ -114,11 +112,7 @@ The wrapper also steps aside automatically when you pass your own
 
 ### `agent/system-prompt.txt`
 
-The one line the wrapper injects:
-
-```text
-You are Claude Code, Anthropic's official CLI for Claude.
-```
+The custom prompt file used for the direct Anthropic provider. Override its path with `PI_PROMPT_FILE`.
 
 ### `agent/extensions/guardian.ts` (+ `fleet-citizen.ts` back-compat stub)
 

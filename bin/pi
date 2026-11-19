@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Wrapper that routes pi through the Claude Code system-prompt fingerprint
-# so the Anthropic OAuth token bills against Claude Pro/Max instead of
-# "third-party app extra usage".
+# Load the provider-scoped prompt hook for chat invocations only.
 # Disable per-invocation: PI_NO_SPOOF=1 pi ...
 # Override real binary: PI_REAL=/path/to/pi ...
 # Edit fingerprint:    ~/.pi/agent/system-prompt.txt
@@ -32,9 +30,9 @@ _pi_resolve_abs() {
 # Auto-detect the real pi binary. Skips this wrapper by checking each
 # $PATH entry in order and picking the first non-self match. Override
 # with PI_REAL=... in the environment if the heuristic picks wrong.
+_self_src="${BASH_SOURCE[0]:-$0}"
+_self="$(_pi_resolve_abs "$_self_src" || printf '%s' "$_self_src")"
 if [ -z "${PI_REAL:-}" ]; then
-  _self_src="${BASH_SOURCE[0]:-$0}"
-  _self="$(_pi_resolve_abs "$_self_src" || printf '%s' "$_self_src")"
   IFS=':' read -ra _path_dirs <<< "$PATH"
   for _d in "${_path_dirs[@]}"; do
     [ -z "$_d" ] && continue
@@ -74,4 +72,5 @@ for arg in "$@"; do
   esac
 done
 
-exec "$PI_REAL" --system-prompt "$(cat "$PI_PROMPT_FILE")" "$@"
+export PI_PROMPT_FILE
+exec "$PI_REAL" -e "$(dirname -- "$_self")/anthropic-prompt.ts" "$@"

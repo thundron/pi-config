@@ -40,6 +40,7 @@ case "$mode" in
     ;;
   --quick)
     run_step "typecheck"              $JS_RUNTIME tests/test-typecheck.mjs
+    run_step "provider prompt"        $JS_RUNTIME --experimental-strip-types tests/test-anthropic-prompt.mjs
     run_step "autocomplete contract"  $JS_RUNTIME tests/test-autocomplete.mjs
     run_step "execpolicy drift"       $JS_RUNTIME tests/test-execpolicy-drift.mjs
     run_step "execpolicy unit"        $JS_RUNTIME tests/test-execpolicy.mjs
@@ -71,6 +72,7 @@ case "$mode" in
     ;;
   all|"")
     run_step "typecheck"              $JS_RUNTIME tests/test-typecheck.mjs
+    run_step "provider prompt"        $JS_RUNTIME --experimental-strip-types tests/test-anthropic-prompt.mjs
     run_step "autocomplete contract"  $JS_RUNTIME tests/test-autocomplete.mjs
     run_step "execpolicy drift"       $JS_RUNTIME tests/test-execpolicy-drift.mjs
     run_step "execpolicy unit"        $JS_RUNTIME tests/test-execpolicy.mjs
